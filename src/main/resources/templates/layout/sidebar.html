@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+</head>
+<body>
+    <!-- Fragment sidebar à inclure dans d'autres pages -->
+    <aside th:fragment="sidebar" class="sidebar">
+        <div class="sidebar-section">
+            <ul>
+                <li><a th:href="@{/import}">Connexion a une base de donnee</a></li>
+                <li><a th:href="@{/liste/employee}">Apercu de migration de table</a></li>
+                <li><a th:href="@{/salary_slip}">Apercu de migration de view</a></li>
+                <li><a th:href="@{/list_salaryStructure}">Apercu de migration des donnees</a></li>
+                <li><a th:href="@{/saisie_salaire}">migration complet</a></li>
+                <li><a th:href="@{/modification_salaire}">Duplication de base</a></li>
+            </ul>
+        </div>
+    </aside>
+</body>
+</html>

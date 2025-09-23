@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="fr" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mon Site - Accueil</title>
+    <!-- Utiliser le chemin correct pour les ressources statiques dans Spring Boot -->
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Inclusion du header avec Thymeleaf -->
+    <div th:replace="~{layout/header :: header}"></div>
+    
+    <div class="main-container">
+        <!-- Inclusion de la sidebar avec Thymeleaf -->
+        <div th:replace="~{layout/sidebar :: sidebar}"></div>
+        
+        <!-- Contenu principal -->
+        <main class="content">
+            <h1>Dashboard</h1>
+            
+        </main>
+    </div>
+    
+    <!-- Inclusion du footer avec Thymeleaf -->
+    <div th:replace="~{layout/footer :: footer}"></div>
+    
+</body>
+</html>

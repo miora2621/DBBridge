@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        .site-header{
+            background-color: brown;
+        }
+    </style>
+</head>
+<body>
+    <!-- Fragment header à inclure dans d'autres pages -->
+    <header th:fragment="header" class="site-header">
+        <div class="logo">
+            <a th:href="@{/statistiques}">DBBridge</a>
+        </div>
+        <nav class="main-nav">
+            <ul>
+                <li><a th:href="@{/statistiques}">Accueil</a></li>
+            </ul>
+        </nav>
+    </header>
+</body>
+</html>

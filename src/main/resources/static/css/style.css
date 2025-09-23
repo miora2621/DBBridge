@@ -1,0 +1,406 @@
+:root {
+    --primary-blue: #2490ef;       /* Bleu ERPNext */
+    --light-bg: #f9fafc;          /* Fond clair */
+    --text-dark: #2e3338;         /* Texte foncé */
+    --text-light: #6c7680;        /* Texte secondaire */
+    --white: #ffffff;
+    --border-color: #d1d8dd;
+    --shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    --error-red: #ff4d4d;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    line-height: 1.6;
+    background-color: var(--light-bg);
+    color: var(--text-dark);
+}
+
+/* Header Styles */
+.site-header {
+    background-color: var(--white);
+    padding: 1rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: var(--shadow);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.logo a {
+    color: var(--primary-blue);
+    font-size: 1.5rem;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.main-nav ul {
+    display: flex;
+    list-style: none;
+}
+
+.main-nav li {
+    margin-left: 1.5rem;
+}
+
+.main-nav a {
+    color: var(--text-dark);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.2s;
+}
+
+.main-nav a:hover {
+    color: var(--primary-blue);
+}
+
+/* Main Container */
+.main-container {
+    display: flex;
+    min-height: calc(100vh - 120px);
+    padding: 1rem;
+}
+
+/* Sidebar Styles */
+.sidebar {
+    width: 250px;
+    background-color: var(--white);
+    padding: 1.5rem;
+    border-right: 1px solid var(--border-color);
+    box-shadow: var(--shadow);
+    border-radius: 8px;
+    margin-right: 1rem;
+}
+
+.sidebar-section {
+    margin-bottom: 1.5rem;
+}
+
+.sidebar-section h3 {
+    margin-bottom: 0.8rem;
+    color: var(--primary-blue);
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.sidebar-section ul {
+    list-style: none;
+}
+
+.sidebar-section li {
+    margin-bottom: 0.5rem;
+}
+
+.sidebar-section a {
+    color: var(--text-light);
+    text-decoration: none;
+    display: block;
+    padding: 0.4rem 0;
+    transition: all 0.2s;
+}
+
+.sidebar-section a:hover {
+    color: var(--primary-blue);
+    padding-left: 5px;
+}
+
+/* Content Styles */
+.content {
+    flex: 1;
+    background-color: var(--white);
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border-color);
+}
+
+.content h1 {
+    margin-bottom: 1.5rem;
+    color: var(--primary-blue);
+    font-weight: 600;
+}
+
+.content p {
+    margin-bottom: 1rem;
+    color: var(--text-light);
+    line-height: 1.7;
+}
+
+/* Footer Styles */
+.site-footer {
+    background-color: var(--white);
+    color: var(--text-light);
+    padding: 1.5rem;
+    border-top: 1px solid var(--border-color);
+    font-size: 0.9rem;
+}
+
+.footer-content {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.footer-section {
+    flex: 1;
+    min-width: 200px;
+    margin-bottom: 1rem;
+    padding: 0 1rem;
+}
+
+.footer-section h3 {
+    color: var(--primary-blue);
+    margin-bottom: 0.8rem;
+    font-size: 1rem;
+}
+
+.footer-section ul {
+    list-style: none;
+}
+
+.footer-section a {
+    color: var(--text-light);
+    text-decoration: none;
+    display: block;
+    margin-bottom: 0.4rem;
+    transition: color 0.2s;
+}
+
+.footer-section a:hover {
+    color: var(--primary-blue);
+}
+
+.copyright {
+    text-align: center;
+    padding-top: 1.5rem;
+    margin-top: 1rem;
+    border-top: 1px solid var(--border-color);
+    color: var(--text-light);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .main-container {
+        flex-direction: column;
+    }
+    
+    .sidebar {
+        width: 100%;
+        margin-right: 0;
+        margin-bottom: 1rem;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+    }
+    
+    .site-header {
+        flex-direction: column;
+        padding: 1rem;
+    }
+    
+    .main-nav ul {
+        margin-top: 1rem;
+    }
+    
+    .main-nav li {
+        margin: 0 0.8rem;
+    }
+}
+
+/* Animation pour les transitions */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.content, .sidebar {
+    animation: fadeIn 0.3s ease-out;
+}
+
+/* Table Styles */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.5rem;
+    background-color: var(--white);
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+thead {
+    background-color: var(--primary-blue);
+    color: var(--white);
+    text-align: left;
+}
+
+th, td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+tbody tr:hover {
+    background-color: #f1f5f9;
+}
+
+th {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.875rem;
+    letter-spacing: 0.5px;
+}
+
+td {
+    color: var(--text-dark);
+    font-size: 0.95rem;
+}
+
+/* Boutons généraux */
+button {
+    background-color: var(--primary-blue);
+    color: var(--white);
+    border: none;
+    padding: 0.6rem 1.2rem;
+    border-radius: 6px;
+    font-size: 1rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+button:hover {
+    background-color: #1f7ed1;
+    transform: translateY(-1px);
+}
+
+button:active {
+    transform: translateY(0);
+    background-color: #186ab3;
+}
+
+button:disabled {
+    background-color: #cbd5e1;
+    cursor: not-allowed;
+}
+
+/* Bouton secondaire */
+.button-secondary {
+    background-color: var(--white);
+    color: var(--primary-blue);
+    border: 1px solid var(--primary-blue);
+}
+
+.button-secondary:hover {
+    background-color: #e6f1fb;
+}
+
+/* Liens stylisés */
+a.anaty_main {
+    display: inline-block;
+    padding: 0.5rem 1rem;
+    background-color: var(--primary-blue);
+    color: var(--white);
+    border-radius: 6px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+    box-shadow: var(--shadow);
+}
+
+a.anaty_main:hover {
+    background-color: #1f7ed1;
+    transform: translateY(-1px);
+    text-decoration: none;
+}
+
+a.anaty_main:active {
+    background-color: #186ab3;
+    transform: translateY(0);
+}
+
+/* Form Styles uniquement pour les formulaires avec la classe "okey" */
+form.okey {
+    background-color: var(--white);
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border-color);
+    max-width: 600px;
+    margin-bottom: 2rem;
+}
+
+form.okey h2 {
+    margin-bottom: 1.5rem;
+    color: var(--primary-blue);
+    font-size: 1.25rem;
+}
+
+form.okey .form-group {
+    margin-bottom: 1.5rem;
+    display: flex;
+    flex-direction: column;
+}
+
+form.okey label {
+    margin-bottom: 0.5rem;
+    color: var(--text-dark);
+    font-weight: 500;
+}
+
+form.okey input,
+form.okey select,
+form.okey textarea {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background-color: #f8fafc;
+    font-size: 1rem;
+    color: var(--text-dark);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    margin-bottom: 1.5rem;
+}
+
+form.okey .form-actions {
+    margin-top: 2rem;
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+}
+
+form.okey input[type="submit"] {
+    background-color: var(--primary-blue);
+    color: var(--white);
+    border: none;
+    padding: 0.6rem 1.2rem;
+    border-radius: 6px;
+    font-size: 1rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+    box-shadow: var(--shadow);
+}
+
+form.okey input[type="submit"]:hover {
+    background-color: #1f7ed1;
+    transform: translateY(-1px);
+}
+
+form.okey input[type="submit"]:active {
+    transform: translateY(0);
+    background-color: #186ab3;
+}
+
+form.okey input[type="submit"]:disabled {
+    background-color: #cbd5e1;
+    cursor: not-allowed;
+}
