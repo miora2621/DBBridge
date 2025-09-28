@@ -404,3 +404,12 @@ form.okey input[type="submit"]:disabled {
     background-color: #cbd5e1;
     cursor: not-allowed;
 }
+
+.success-message {
+    color: green;
+    margin-bottom: 15px;
+}
+.error-message {
+    color: red;
+    margin-bottom: 15px;
+}

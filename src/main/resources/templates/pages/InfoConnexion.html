@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="fr" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mon Site - Accueil</title>
+    <!-- Utiliser le chemin correct pour les ressources statiques dans Spring Boot -->
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Inclusion du header avec Thymeleaf -->
+    <div th:replace="~{layout/header :: header}"></div>
+    
+    <div class="main-container">
+        <!-- Inclusion de la sidebar avec Thymeleaf -->
+        <div th:replace="~{layout/sidebar :: sidebar}"></div>
+        
+        <!-- Contenu principal -->
+        <main class="content">
+            <h1>Ampidiro eto ny info momba ny connexion oan'ny base oracle anao</h1>
+
+            <!-- Affichage des messages -->
+            <div th:if="${message}" class="success-message" th:text="${message}"></div>
+            <div th:if="${error}" class="error-message" th:text="${error}"></div>
+
+            <form th:action="@{/Connexion}" method="post" class="okey" th:object="${oracle}">
+                <label> host : </label>
+                <input type="text" placeholder="IP Address" th:field="*{host}">
+                <label>port : </label>
+                <input type="text" placeholder="Port" th:field="*{port}">
+                <label> service name : </label>
+                <input type="text" placeholder="ORCL" th:field="*{serviceName}">
+                <label>SID</label>
+                <input type="text" placeholder="XE" th:field="*{sid}">
+                <label>Username : </label>
+                <input type="text" autocomplete="off" th:field="*{username}">
+                <label>Password : </label>
+                <input type="password" autocomplete="off" th:field="*{password}">
+                <input type="submit" value="Connect" >
+            </form>
+        </main>
+    </div>
+    
+    <!-- Inclusion du footer avec Thymeleaf -->
+    <div th:replace="~{layout/footer :: footer}"></div>
+    
+</body>
+</html>
