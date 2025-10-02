@@ -91,6 +91,20 @@ public class OracleController {
         }
         return "pages/Accueil";
     }
+
+    @GetMapping("/testOracle")
+    public String testOracle(HttpSession session) {
+        Oracle oracle = session.getAttribute("dbOracle") != null ? (Oracle) session.getAttribute("dbOracle") : null;
+        PostgreSQL postgreSQL = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
+        try {
+            // String script = OracleService.generateCreateTableSQL(oracle, "menudynamique");
+            // OracleService.createPostgresTable(postgreSQL, script);
+            OracleService.migrationTablesAndDataOracleToPostgresql(oracle, postgreSQL);
+        } catch (Exception e) {
+            e.printStackTrace();    
+        }
+        return "pages/Accueil";
+    }
     
     
 }
