@@ -8,7 +8,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import stage.bici.DBBridge.Model.DonneeTablePostgres;
 import stage.bici.DBBridge.Model.Oracle;
@@ -128,15 +131,26 @@ public class PostgresService {
         }
     }
 
-     public static String generateCreateTableSQL(PostgreSQL postgreSQL,String tableName) throws SQLException {
+    public static String generateCreateTableSQL(PostgreSQL postgreSQL,String tableName) throws SQLException {
         List<DonneeTablePostgres> columns = getPostgresTableColumns(postgreSQL, tableName);
         StringBuilder sb = new StringBuilder("CREATE TABLE " + tableName.toUpperCase() + " (");
 
+        Set<String> oracleReserved = new HashSet<>(Arrays.asList(
+            "FILE", "SIZE", "DATE", "USER", "TABLE", "INDEX", "ORDER", "GROUP"
+        ));
+
         for (int i = 0; i < columns.size(); i++) {
             DonneeTablePostgres col = columns.get(i);
-            sb.append(col.getName().toUpperCase())
-              .append(" ")
-              .append(mapPostgresTypeToOracle(col));
+            
+            String colName = col.getName().toUpperCase();
+            
+            if (oracleReserved.contains(colName) || colName.contains(" ") || colName.matches(".*[^A-Z0-9_].*")) {
+                colName = "\"" + colName + "\"";
+            }
+            
+            sb.append(colName)
+            .append(" ")
+            .append(mapPostgresTypeToOracle(col));
 
             if (!col.isNullable()) sb.append(" NOT NULL");
 
