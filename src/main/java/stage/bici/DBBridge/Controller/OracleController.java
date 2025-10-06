@@ -105,6 +105,16 @@ public class OracleController {
         }
         return "pages/Accueil";
     }
-    
-    
+
+    @GetMapping("/testViewOracle")
+    public String insertView(HttpSession session) {
+        Oracle oracle = session.getAttribute("dbOracle") != null ? (Oracle) session.getAttribute("dbOracle") : null;
+        PostgreSQL postgreSQL = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
+        try {
+            OracleService.migrationViewsOracleToPostgres(oracle, postgreSQL);
+        } catch (Exception e) {
+            e.printStackTrace();    
+        }
+        return "pages/Accueil";
+    }
 }
