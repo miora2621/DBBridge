@@ -10,6 +10,8 @@ import jakarta.servlet.http.HttpSession;
 import stage.bici.DBBridge.Model.DonneeTableOracle;
 import stage.bici.DBBridge.Model.Oracle;
 import stage.bici.DBBridge.Model.PostgreSQL;
+import stage.bici.DBBridge.Service.CompleteMigrationService;
+import stage.bici.DBBridge.Service.CompletePostgresToOracleMigration;
 import stage.bici.DBBridge.Service.OracleService;
 
 
@@ -111,7 +113,7 @@ public class OracleController {
         Oracle oracle = session.getAttribute("dbOracle") != null ? (Oracle) session.getAttribute("dbOracle") : null;
         PostgreSQL postgreSQL = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
         try {
-            OracleService.migrationViewsOracleToPostgres(oracle, postgreSQL);
+            CompletePostgresToOracleMigration.migrateCompleteDatabase(postgreSQL,oracle);
         } catch (Exception e) {
             e.printStackTrace();    
         }

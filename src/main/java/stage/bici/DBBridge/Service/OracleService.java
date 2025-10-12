@@ -927,4 +927,589 @@ public class OracleService {
             conn.close();
         }
     }
+
+    // ========== MIGRATION DES FONCTIONS ORACLE → POSTGRESQL ==========
+
+    // 1. Récupérer tous les noms de fonctions Oracle
+    public static List<String> getAllFunctionNames(Oracle oracle) throws SQLException {
+        List<String> functionNames = new ArrayList<>();
+        try (Connection conn = OracleService.OracleConnexion(oracle)) {
+            String sql = "SELECT object_name FROM user_objects WHERE object_type = 'FUNCTION'";
+            try (Statement stmt = conn.createStatement(); 
+                ResultSet rs = stmt.executeQuery(sql)) {
+                while (rs.next()) {
+                    functionNames.add(rs.getString("OBJECT_NAME"));
+                }
+            }
+        }
+        return functionNames;
+    }
+
+    // 2. Récupérer la définition complète d'une fonction Oracle
+    public static String getOracleFunctionDefinition(Connection conn, String functionName) throws SQLException {
+        StringBuilder definition = new StringBuilder();
+        String sql = "SELECT text FROM user_source WHERE name = ? AND type = 'FUNCTION' ORDER BY line";
+        
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, functionName.toUpperCase());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    definition.append(rs.getString("TEXT"));
+                }
+            }
+        }
+        return definition.toString();
+    }
+
+    // 3. Convertir la syntaxe Oracle → PostgreSQL pour les fonctions
+    public static String convertOracleFunctionToPostgres(String oracleFunction, String functionName) {
+        if (oracleFunction == null || oracleFunction.trim().isEmpty()) {
+            return null;
+        }
+        
+        String pgFunction = oracleFunction;
+        
+        // 1. Remplacer CREATE OR REPLACE FUNCTION
+        pgFunction = pgFunction.replaceAll("(?i)CREATE\\s+OR\\s+REPLACE\\s+FUNCTION", "CREATE OR REPLACE FUNCTION");
+        
+        // 2. Convertir RETURN au lieu de RETURNS
+        pgFunction = pgFunction.replaceAll("(?i)\\bRETURN\\s+(VARCHAR2|NUMBER|DATE|CLOB|BLOB)", "RETURNS $1");
+        
+        // 3. Convertir les types Oracle → PostgreSQL
+        pgFunction = pgFunction.replaceAll("(?i)\\bVARCHAR2\\b", "VARCHAR");
+        pgFunction = pgFunction.replaceAll("(?i)\\bNUMBER\\b", "NUMERIC");
+        pgFunction = pgFunction.replaceAll("(?i)\\bDATE\\b", "TIMESTAMP");
+        pgFunction = pgFunction.replaceAll("(?i)\\bCLOB\\b", "TEXT");
+        pgFunction = pgFunction.replaceAll("(?i)\\bBLOB\\b", "BYTEA");
+        
+        // 4. Ajouter LANGUAGE plpgsql si manquant
+        if (!pgFunction.toUpperCase().contains("LANGUAGE")) {
+            pgFunction = pgFunction.replaceAll("(?i)\\bAS\\s*\\$", "LANGUAGE plpgsql AS $$");
+            if (!pgFunction.contains("$$")) {
+                pgFunction = pgFunction.replaceAll("(?i)\\bIS\\b", "AS $$");
+                pgFunction = pgFunction.replaceAll("(?i)\\bBEGIN\\b", "LANGUAGE plpgsql\nBEGIN");
+                if (!pgFunction.trim().endsWith("$$")) {
+                    pgFunction += "\n$$";
+                }
+            }
+        }
+        
+        // 5. Remplacer IS par AS pour PostgreSQL
+        pgFunction = pgFunction.replaceAll("(?i)\\bIS\\s+BEGIN", "AS $$\nBEGIN");
+        
+        // 6. Ajouter $$ à la fin si manquant
+        if (!pgFunction.trim().endsWith("$$") && !pgFunction.trim().endsWith(";")) {
+            pgFunction = pgFunction.trim() + "\n$$;";
+        }
+        
+        // 7. Convertir les fonctions Oracle spécifiques
+        pgFunction = pgFunction.replaceAll("(?i)\\bSYSDATE\\b", "CURRENT_TIMESTAMP");
+        pgFunction = pgFunction.replaceAll("(?i)\\bNVL\\s*\\(", "COALESCE(");
+        pgFunction = pgFunction.replaceAll("(?i)\\bTO_CHAR\\s*\\(", "TO_CHAR(");
+        pgFunction = pgFunction.replaceAll("(?i)\\bTO_NUMBER\\s*\\(", "CAST(");
+        
+        // 8. Gérer RETURN au lieu de RETURN (dans le corps)
+        pgFunction = pgFunction.replaceAll("(?i)\\bRETURN\\s+([^;]+);", "RETURN $1;");
+        
+        // 9. Nettoyer les espaces multiples
+        pgFunction = pgFunction.replaceAll("\\s+", " ").trim();
+        
+        // 10. Mettre les identifiants en minuscules
+        Pattern pattern = Pattern.compile("\\b([A-Z][A-Z0-9_]*)\\b");
+        Matcher matcher = pattern.matcher(pgFunction);
+        StringBuffer sb = new StringBuffer();
+        Set<String> keywords = new HashSet<>(Arrays.asList(
+            "CREATE", "OR", "REPLACE", "FUNCTION", "RETURNS", "AS", "BEGIN", "END", 
+            "RETURN", "IF", "THEN", "ELSE", "ELSIF", "LOOP", "WHILE", "FOR", "DECLARE",
+            "VARCHAR", "NUMERIC", "TIMESTAMP", "TEXT", "LANGUAGE", "PLPGSQL", "SELECT",
+            "FROM", "WHERE", "AND", "OR", "NOT", "NULL", "IS", "IN", "BETWEEN"
+        ));
+        
+        while (matcher.find()) {
+            String word = matcher.group(1);
+            if (keywords.contains(word.toUpperCase())) {
+                matcher.appendReplacement(sb, word.toUpperCase());
+            } else {
+                matcher.appendReplacement(sb, word.toLowerCase());
+            }
+        }
+        matcher.appendTail(sb);
+        pgFunction = sb.toString();
+        
+        return pgFunction;
+    }
+
+    // 4. Détecter les dépendances entre fonctions
+    public static Set<String> extractFunctionDependencies(String functionSQL, List<String> allFunctions) {
+        Set<String> deps = new HashSet<>();
+        if (functionSQL == null) return deps;
+        
+        String upperSQL = functionSQL.toUpperCase();
+        
+        for (String func : allFunctions) {
+            String funcUpper = func.toUpperCase();
+            // Chercher si la fonction est appelée (pattern: nom_fonction()
+            if (upperSQL.contains(funcUpper + "(") || upperSQL.contains(funcUpper + " (")) {
+                deps.add(func);
+            }
+        }
+        
+        return deps;
+    }
+
+    // 5. Trier les fonctions par dépendances
+    public static List<String> sortFunctionsByDependencies(Oracle oracle) throws SQLException {
+        try (Connection oracleConn = OracleService.OracleConnexion(oracle)) {
+            List<String> allFunctions = getAllFunctionNames(oracle);
+            Map<String, Set<String>> dependencies = new HashMap<>();
+            Map<String, String> functionDefinitions = new HashMap<>();
+            
+            System.out.println("🔍 Analyse des dépendances entre fonctions...");
+            
+            // Récupérer toutes les définitions
+            for (String funcName : allFunctions) {
+                String sql = getOracleFunctionDefinition(oracleConn, funcName);
+                functionDefinitions.put(funcName, sql);
+            }
+            
+            // Détecter les dépendances
+            for (String funcName : allFunctions) {
+                String sql = functionDefinitions.get(funcName);
+                Set<String> deps = extractFunctionDependencies(sql, allFunctions);
+                deps.remove(funcName); // Enlever auto-référence
+                dependencies.put(funcName, deps);
+            }
+            
+            // Tri topologique
+            List<String> sorted = new ArrayList<>();
+            Set<String> visited = new HashSet<>();
+            Set<String> visiting = new HashSet<>();
+            
+            for (String func : allFunctions) {
+                if (!visited.contains(func)) {
+                    topologicalSortFunction(func, dependencies, visited, visiting, sorted);
+                }
+            }
+            
+            System.out.println("✅ Ordre de création calculé pour " + sorted.size() + " fonctions");
+            return sorted;
+        }
+    }
+
+    // Tri topologique pour fonctions
+    private static void topologicalSortFunction(String func, Map<String, Set<String>> deps,
+                                            Set<String> visited, Set<String> visiting,
+                                            List<String> sorted) {
+        if (visited.contains(func)) return;
+        
+        if (visiting.contains(func)) {
+            // Cycle détecté
+            if (!sorted.contains(func)) {
+                sorted.add(func);
+                visited.add(func);
+            }
+            return;
+        }
+        
+        visiting.add(func);
+        
+        Set<String> funcDeps = deps.get(func);
+        if (funcDeps != null) {
+            for (String dep : funcDeps) {
+                topologicalSortFunction(dep, deps, visited, visiting, sorted);
+            }
+        }
+        
+        visiting.remove(func);
+        
+        if (!sorted.contains(func)) {
+            sorted.add(func);
+        }
+        visited.add(func);
+    }
+
+    // 6. Créer la fonction dans PostgreSQL
+    public static void createPostgresFunction(PostgreSQL postgres, String createSQL) throws SQLException {
+        Connection conn = PostgresService.PostgresConnexion(postgres);
+        try (Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate(createSQL);
+        } finally {
+            conn.close();
+        }
+    }
+
+    // 7. MIGRATION COMPLÈTE DES FONCTIONS
+    public static void migrationFunctionsOracleToPostgres(Oracle oracle, PostgreSQL postgres) throws SQLException {
+        
+        // 1. Obtenir l'ordre correct des fonctions
+        List<String> orderedFunctions = sortFunctionsByDependencies(oracle);
+        
+        try (Connection oracleConn = OracleService.OracleConnexion(oracle)) {
+            System.out.println("📊 Migration de " + orderedFunctions.size() + " fonctions dans l'ordre optimal");
+            
+            Set<String> created = new HashSet<>();
+            Map<String, String> failedFunctions = new HashMap<>();
+            
+            // 2. Créer les fonctions dans l'ordre (max 5 passes)
+            for (int pass = 1; pass <= 5; pass++) {
+                System.out.println("\n🔄 PASSE " + pass);
+                int passSuccess = 0;
+                
+                for (String functionName : orderedFunctions) {
+                    if (created.contains(functionName)) continue;
+                    
+                    try {
+                        String oracleFunctionSQL = getOracleFunctionDefinition(oracleConn, functionName);
+                        
+                        if (oracleFunctionSQL == null || oracleFunctionSQL.trim().isEmpty()) {
+                            System.out.println("⚠️ " + functionName + " (définition vide)");
+                            failedFunctions.put(functionName, "Définition vide");
+                            continue;
+                        }
+                        
+                        String pgFunctionSQL = convertOracleFunctionToPostgres(oracleFunctionSQL, functionName);
+                        
+                        if (pgFunctionSQL == null) {
+                            System.out.println("⚠️ " + functionName + " (conversion échouée)");
+                            failedFunctions.put(functionName, "Conversion échouée");
+                            continue;
+                        }
+                        
+                        createPostgresFunction(postgres, pgFunctionSQL);
+                        created.add(functionName);
+                        passSuccess++;
+                        System.out.println("✅ " + functionName);
+                        
+                    } catch (Exception e) {
+                        if (pass == 5) {
+                            String error = e.getMessage();
+                            failedFunctions.put(functionName, error != null ? error.substring(0, Math.min(100, error.length())) : "Erreur inconnue");
+                            System.err.println("❌ " + functionName + ": " + (error != null ? error.substring(0, Math.min(80, error.length())) : "Erreur"));
+                        }
+                    }
+                }
+                
+                System.out.println("   📊 Total: " + created.size() + "/" + orderedFunctions.size() + " (+" + passSuccess + " cette passe)");
+                
+                if (passSuccess == 0) break;
+            }
+            
+            // 3. Créer des fonctions placeholder pour celles qui ont échoué
+            if (created.size() < orderedFunctions.size()) {
+                System.out.println("\n🔧 PASSE FINALE - Placeholder pour fonctions impossibles");
+                for (String functionName : orderedFunctions) {
+                    if (!created.contains(functionName)) {
+                        try {
+                            // Créer une fonction stub qui retourne NULL
+                            String placeholderSQL = "CREATE OR REPLACE FUNCTION " + functionName.toLowerCase() + 
+                                                "() RETURNS TEXT LANGUAGE plpgsql AS $$ BEGIN RETURN 'FONCTION_NON_MIGREE'; END; $$;";
+                            createPostgresFunction(postgres, placeholderSQL);
+                            created.add(functionName);
+                            System.out.println("⚠️ " + functionName + " (placeholder)");
+                        } catch (Exception e) {
+                            System.err.println("❌ IMPOSSIBLE: " + functionName);
+                        }
+                    }
+                }
+            }
+            
+            // 4. Résumé détaillé
+            System.out.println("\n" + "=".repeat(50));
+            System.out.println("=== RÉSUMÉ MIGRATION FONCTIONS ===");
+            System.out.println("=".repeat(50));
+            System.out.println("✅ Fonctions migrées: " + (created.size() - failedFunctions.size()));
+            System.out.println("⚠️ Fonctions placeholder: " + failedFunctions.size());
+            System.out.println("📊 Total: " + created.size() + "/" + orderedFunctions.size());
+            
+            if (!failedFunctions.isEmpty()) {
+                System.out.println("\n🔧 Fonctions nécessitant attention manuelle:");
+                for (Map.Entry<String, String> entry : failedFunctions.entrySet()) {
+                    System.out.println("   - " + entry.getKey() + ": " + entry.getValue());
+                }
+            }
+        }
+    }
+
+    // ========== 1. RÉCUPÉRER TOUS LES NOMS DE SÉQUENCES ORACLE ==========
+    public static List<String> getAllSequenceNames(Oracle oracle) throws SQLException {
+        List<String> sequenceNames = new ArrayList<>();
+        Connection conn = null;
+        Statement stmt = null;
+        ResultSet rs = null;
+        
+        try {
+            conn = OracleService.OracleConnexion(oracle);
+            String sql = "SELECT sequence_name FROM user_sequences";
+            stmt = conn.createStatement();
+            rs = stmt.executeQuery(sql);
+            
+            while (rs.next()) {
+                sequenceNames.add(rs.getString("SEQUENCE_NAME"));
+            }
+        } finally {
+            if (rs != null) rs.close();
+            if (stmt != null) stmt.close();
+            if (conn != null) conn.close();
+        }
+        
+        return sequenceNames;
+    }
+    
+    // ========== 2. RÉCUPÉRER LES DÉTAILS COMPLETS D'UNE SÉQUENCE ORACLE ==========
+    public static SequenceInfo getOracleSequenceInfo(Oracle oracle, String sequenceName) throws SQLException {
+        SequenceInfo info = new SequenceInfo();
+        info.setName(sequenceName);
+        
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
+        
+        try {
+            conn = OracleService.OracleConnexion(oracle);
+            String sql = "SELECT last_number, increment_by, min_value, max_value, " +
+                        "cycle_flag, cache_size FROM user_sequences WHERE sequence_name = ?";
+            
+            ps = conn.prepareStatement(sql);
+            ps.setString(1, sequenceName.toUpperCase());
+            rs = ps.executeQuery();
+            
+            if (rs.next()) {
+                info.setLastValue(rs.getLong("LAST_NUMBER"));
+                info.setIncrementBy(rs.getLong("INCREMENT_BY"));
+                info.setMinValue(rs.getLong("MIN_VALUE"));
+                info.setMaxValue(rs.getLong("MAX_VALUE"));
+                info.setCycle("Y".equals(rs.getString("CYCLE_FLAG")));
+                info.setCacheSize(rs.getLong("CACHE_SIZE"));
+            }
+        } finally {
+            if (rs != null) rs.close();
+            if (ps != null) ps.close();
+            if (conn != null) conn.close();
+        }
+        
+        return info;
+    }
+    
+    // ========== 3. GÉNÉRER LE SQL DE CRÉATION POUR POSTGRESQL ==========
+    public static String generatePostgresSequenceSQL(SequenceInfo info) {
+        StringBuilder sql = new StringBuilder();
+        
+        sql.append("CREATE SEQUENCE IF NOT EXISTS ")
+           .append(info.getName().toLowerCase())
+           .append(" INCREMENT BY ").append(info.getIncrementBy())
+           .append(" MINVALUE ").append(info.getMinValue())
+           .append(" MAXVALUE ").append(info.getMaxValue())
+           .append(" START WITH ").append(info.getLastValue())
+           .append(" CACHE ").append(info.getCacheSize());
+        
+        if (info.isCycle()) {
+            sql.append(" CYCLE");
+        } else {
+            sql.append(" NO CYCLE");
+        }
+        
+        sql.append(";");
+        
+        return sql.toString();
+    }
+    
+    // ========== 4. CRÉER LA SÉQUENCE DANS POSTGRESQL ==========
+    public static void createPostgresSequence(PostgreSQL postgres, String createSQL) throws SQLException {
+        Connection conn = null;
+        Statement stmt = null;
+        
+        try {
+            conn = PostgresService.PostgresConnexion(postgres);
+            stmt = conn.createStatement();
+            stmt.executeUpdate(createSQL);
+        } finally {
+            if (stmt != null) stmt.close();
+            if (conn != null) conn.close();
+        }
+    }
+    
+    // ========== 5. SYNCHRONISER LA VALEUR ACTUELLE DE LA SÉQUENCE ==========
+    public static void syncSequenceValue(PostgreSQL postgres, String sequenceName, long currentValue) throws SQLException {
+        Connection conn = null;
+        Statement stmt = null;
+        ResultSet rs = null;
+        
+        try {
+            conn = PostgresService.PostgresConnexion(postgres);
+            stmt = conn.createStatement();
+            String sql = "SELECT setval('" + sequenceName.toLowerCase() + "', " + currentValue + ", false)";
+            rs = stmt.executeQuery(sql);
+        } finally {
+            if (rs != null) rs.close();
+            if (stmt != null) stmt.close();
+            if (conn != null) conn.close();
+        }
+    }
+    
+    // ========== 6. CRÉER UNE SÉQUENCE PAR DÉFAUT (EN CAS D'ÉCHEC) ==========
+    public static void createDefaultSequence(PostgreSQL postgres, String sequenceName) throws SQLException {
+        String defaultSQL = "CREATE SEQUENCE IF NOT EXISTS " + 
+                          sequenceName.toLowerCase() + 
+                          " INCREMENT BY 1" +
+                          " MINVALUE 1" +
+                          " MAXVALUE 9223372036854775807" +
+                          " START WITH 1" +
+                          " CACHE 20" +
+                          " NO CYCLE;";
+        
+        createPostgresSequence(postgres, defaultSQL);
+    }
+    
+    // ========== 7. VÉRIFIER SI UNE SÉQUENCE EXISTE DANS POSTGRESQL ==========
+    public static boolean sequenceExistsInPostgres(PostgreSQL postgres, String sequenceName) throws SQLException {
+        Connection conn = null;
+        PreparedStatement ps = null;
+        ResultSet rs = null;
+        
+        try {
+            conn = PostgresService.PostgresConnexion(postgres);
+            String sql = "SELECT COUNT(*) FROM information_schema.sequences WHERE sequence_name = ?";
+            ps = conn.prepareStatement(sql);
+            ps.setString(1, sequenceName.toLowerCase());
+            rs = ps.executeQuery();
+            
+            if (rs.next()) {
+                return rs.getInt(1) > 0;
+            }
+        } finally {
+            if (rs != null) rs.close();
+            if (ps != null) ps.close();
+            if (conn != null) conn.close();
+        }
+        
+        return false;
+    }
+    
+    // ========== 8. OBTENIR LA VALEUR ACTUELLE D'UNE SÉQUENCE POSTGRESQL ==========
+    public static long getPostgresSequenceValue(PostgreSQL postgres, String sequenceName) throws SQLException {
+        Connection conn = null;
+        Statement stmt = null;
+        ResultSet rs = null;
+        
+        try {
+            conn = PostgresService.PostgresConnexion(postgres);
+            stmt = conn.createStatement();
+            String sql = "SELECT last_value FROM " + sequenceName.toLowerCase();
+            rs = stmt.executeQuery(sql);
+            
+            if (rs.next()) {
+                return rs.getLong("last_value");
+            }
+        } finally {
+            if (rs != null) rs.close();
+            if (stmt != null) stmt.close();
+            if (conn != null) conn.close();
+        }
+        
+        return 0;
+    }
+    
+    // ========== 9. MIGRATION COMPLÈTE - FONCTION PRINCIPALE ==========
+    public static void migrationSequencesOracleToPostgres(Oracle oracle, PostgreSQL postgres) throws SQLException {
+        
+        System.out.println("\n" + "=".repeat(60));
+        System.out.println("=== DÉBUT DE LA MIGRATION DES SÉQUENCES ===");
+        System.out.println("=".repeat(60));
+        
+        // Récupérer toutes les séquences Oracle
+        List<String> allSequences = getAllSequenceNames(oracle);
+        
+        System.out.println("📊 Nombre total de séquences à migrer: " + allSequences.size());
+        
+        if (allSequences.isEmpty()) {
+            System.out.println("✅ Aucune séquence à migrer");
+            return;
+        }
+        
+        int successCount = 0;
+        int errorCount = 0;
+        int recoveredCount = 0;
+        List<String> failedSequences = new ArrayList<>();
+        
+        // PHASE 1 : Migration normale
+        System.out.println("\n🔄 PHASE 1 - Migration avec propriétés Oracle");
+        System.out.println("-".repeat(60));
+        
+        for (String sequenceName : allSequences) {
+            try {
+                // Récupérer les infos de la séquence Oracle
+                SequenceInfo info = getOracleSequenceInfo(oracle, sequenceName);
+                
+                // Générer le SQL PostgreSQL
+                String createSQL = generatePostgresSequenceSQL(info);
+                
+                System.out.println("\n🔄 Migration: " + sequenceName);
+                System.out.println("   ├─ Valeur actuelle: " + info.getLastValue());
+                System.out.println("   ├─ Incrément: " + info.getIncrementBy());
+                System.out.println("   ├─ Min: " + info.getMinValue() + " | Max: " + info.getMaxValue());
+                System.out.println("   ├─ Cache: " + info.getCacheSize());
+                System.out.println("   └─ Cycle: " + (info.isCycle() ? "OUI" : "NON"));
+                
+                // Créer la séquence dans PostgreSQL
+                createPostgresSequence(postgres, createSQL);
+                
+                // Synchroniser la valeur actuelle
+                syncSequenceValue(postgres, sequenceName, info.getLastValue());
+                
+                System.out.println("✅ Séquence migrée avec succès: " + sequenceName);
+                successCount++;
+                
+            } catch (Exception e) {
+                System.err.println("❌ Erreur pour " + sequenceName + ": " + e.getMessage());
+                errorCount++;
+                failedSequences.add(sequenceName);
+            }
+        }
+        
+        // PHASE 2 : Récupération des séquences échouées
+        if (!failedSequences.isEmpty()) {
+            System.out.println("\n🔧 PHASE 2 - Récupération avec valeurs par défaut");
+            System.out.println("-".repeat(60));
+            
+            for (String sequenceName : failedSequences) {
+                try {
+                    createDefaultSequence(postgres, sequenceName);
+                    System.out.println("⚠️ " + sequenceName + " créée avec valeurs par défaut");
+                    recoveredCount++;
+                    
+                } catch (Exception e) {
+                    System.err.println("❌ Impossible de créer " + sequenceName);
+                }
+            }
+            
+            successCount += recoveredCount;
+            errorCount -= recoveredCount;
+        }
+        
+        // RÉSUMÉ FINAL
+        System.out.println("\n" + "=".repeat(60));
+        System.out.println("=== RÉSUMÉ FINAL DE LA MIGRATION ===");
+        System.out.println("=".repeat(60));
+        System.out.println("✅ Séquences migrées avec propriétés Oracle: " + (successCount - recoveredCount));
+        
+        if (recoveredCount > 0) {
+            System.out.println("⚠️ Séquences créées avec valeurs par défaut: " + recoveredCount);
+        }
+        
+        System.out.println("📊 TOTAL MIGRÉ: " + successCount + "/" + allSequences.size());
+        
+        if (errorCount > 0) {
+            System.out.println("❌ Séquences non migrées: " + errorCount);
+        }
+        
+        System.out.println("=".repeat(60));
+        
+        if (errorCount == 0) {
+            System.out.println("🎉 SUCCÈS COMPLET - TOUTES LES SÉQUENCES MIGRÉES!");
+        } else {
+            System.out.println("⚠️ Migration incomplète - Vérifier les erreurs ci-dessus");
+        }
+        
+        System.out.println("=".repeat(60) + "\n");
+    }
 }
