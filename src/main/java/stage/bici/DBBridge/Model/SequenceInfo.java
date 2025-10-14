@@ -8,7 +8,22 @@ public class SequenceInfo {
     private long maxValue;
     private boolean cycle;
     private long cacheSize;
+    private long lastNumber;
+    private boolean ordered;
     
+   
+    public boolean isOrdered() {
+        return ordered;
+    }
+    public void setOrdered(boolean ordered) {
+        this.ordered = ordered;
+    }
+    public long getLastNumber() {
+        return lastNumber;
+    }
+    public void setLastNumber(long lastNumber) {
+        this.lastNumber = lastNumber;
+    }
     // Getters et Setters
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }

@@ -113,7 +113,7 @@ public class OracleController {
         Oracle oracle = session.getAttribute("dbOracle") != null ? (Oracle) session.getAttribute("dbOracle") : null;
         PostgreSQL postgreSQL = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
         try {
-            CompletePostgresToOracleMigration.migrateCompleteDatabase(postgreSQL,oracle);
+            CompleteMigrationService.migrateCompleteDatabase(oracle, postgreSQL);
         } catch (Exception e) {
             e.printStackTrace();    
         }

@@ -1,544 +1,225 @@
 package stage.bici.DBBridge.Service;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.sql.*;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.math.BigDecimal;
 
 import stage.bici.DBBridge.Model.Oracle;
 import stage.bici.DBBridge.Model.PostgreSQL;
-import stage.bici.DBBridge.Model.SequenceInfo;
 
 public class CompleteMigrationService {
-    
-    // Statistiques de migration
+
     private static class MigrationStats {
         int tablesTotal, tablesSuccess, tablesFailed;
         int dataTotal, dataSuccess, dataFailed;
-        int sequencesTotal, sequencesSuccess, sequencesFailed;
-        int viewsTotal, viewsSuccess, viewsFailed;
-        int functionsTotal, functionsSuccess, functionsFailed;
-        int constraintsTotal, constraintsSuccess, constraintsFailed;
-        int indexesTotal, indexesSuccess, indexesFailed;
-        int triggersTotal, triggersSuccess, triggersFailed;
-        
+        int sequencesValid, sequencesMigrated, sequencesInvalid;
+        int functionsValid, functionsMigrated, functionsInvalid;
+        int viewsValid, viewsMigrated, viewsInvalid;
+        int constraintsValid, constraintsMigrated, constraintsInvalid;
+        int indexesValid, indexesMigrated, indexesInvalid;
+        int triggersValid, triggersMigrated, triggersInvalid;
+
         void printSummary() {
             System.out.println("\n" + "=".repeat(80));
             System.out.println("=== RÉSUMÉ DE LA MIGRATION ===");
             System.out.println("=".repeat(80));
-            System.out.println(String.format("📊 TABLES       : %d/%d migrées (%d échecs)", 
-                tablesSuccess, tablesTotal, tablesFailed));
-            System.out.println(String.format("📊 DONNÉES      : %d/%d migrées (%d échecs)", 
-                dataSuccess, dataTotal, dataFailed));
-            System.out.println(String.format("📊 SÉQUENCES    : %d/%d migrées (%d échecs)", 
-                sequencesSuccess, sequencesTotal, sequencesFailed));
-            System.out.println(String.format("📊 VUES         : %d/%d migrées (%d échecs)", 
-                viewsSuccess, viewsTotal, viewsFailed));
-            System.out.println(String.format("📊 FONCTIONS    : %d/%d migrées (%d échecs)", 
-                functionsSuccess, functionsTotal, functionsFailed));
-            System.out.println(String.format("📊 CONTRAINTES  : %d/%d migrées (%d échecs)", 
-                constraintsSuccess, constraintsTotal, constraintsFailed));
-            System.out.println(String.format("📊 INDEX        : %d/%d migrés (%d échecs)", 
-                indexesSuccess, indexesTotal, indexesFailed));
-            System.out.println(String.format("📊 TRIGGERS     : %d/%d migrés (%d échecs)", 
-                triggersSuccess, triggersTotal, triggersFailed));
+            System.out.println(String.format("📊 TABLES       : %d/%d migrées (%d échecs)", tablesSuccess, tablesTotal, tablesFailed));
+            System.out.println(String.format("📊 DONNÉES      : %d/%d migrées (%d échecs)", dataSuccess, dataTotal, dataFailed));
+            System.out.println(String.format("📊 SÉQUENCES    : %d valides, %d migrées, %d invalides", sequencesValid, sequencesMigrated, sequencesInvalid));
+            System.out.println(String.format("📊 VUES         : %d valides, %d migrées, %d invalides", viewsValid, viewsMigrated, viewsInvalid));
+            System.out.println(String.format("📊 FONCTIONS    : %d valides, %d migrées, %d invalides", functionsValid, functionsMigrated, functionsInvalid));
+            System.out.println(String.format("📊 CONTRAINTES  : %d valides, %d migrées, %d invalides", constraintsValid, constraintsMigrated, constraintsInvalid));
+            System.out.println(String.format("📊 INDEX        : %d valides, %d migrés, %d invalides", indexesValid, indexesMigrated, indexesInvalid));
+            System.out.println(String.format("📊 TRIGGERS     : %d valides, %d migrés, %d invalides", triggersValid, triggersMigrated, triggersInvalid));
             System.out.println("=".repeat(80));
         }
     }
-    
-    // ========== MIGRATION COMPLÈTE ==========
+
+    private static class DatabaseObjects {
+        String owner;
+        Set<String> validTables = new HashSet<>();
+        Set<String> validSequences = new HashSet<>();
+        Set<String> invalidSequences = new HashSet<>();
+        Set<String> validFunctions = new HashSet<>();
+        Set<String> invalidFunctions = new HashSet<>();
+        Set<String> validViews = new HashSet<>();
+        Set<String> invalidViews = new HashSet<>();
+        Map<String, Set<String>> viewDependencies = new HashMap<>();
+        Set<String> validTriggers = new HashSet<>();
+        Set<String> invalidTriggers = new HashSet<>();
+        Map<String, Boolean> pkEnabledByTable = new HashMap<>();
+        Set<String> validIndexes = new HashSet<>();
+        Set<String> invalidIndexes = new HashSet<>();
+    }
+
     public static void migrateCompleteDatabase(Oracle oracle, PostgreSQL postgres) throws SQLException {
-        
         System.out.println("\n" + "=".repeat(80));
         System.out.println("=== MIGRATION COMPLÈTE ORACLE → POSTGRESQL ===");
         System.out.println("=".repeat(80));
-        
-        long startTime = System.currentTimeMillis();
+        long start = System.currentTimeMillis();
         MigrationStats stats = new MigrationStats();
-        
+
         try {
-            // ÉTAPE 1 : VALIDATION DES OBJETS ORACLE (CORRIGÉE)
             System.out.println("\n" + "=".repeat(80));
             System.out.println("ÉTAPE 1/9 : VALIDATION DES OBJETS ORACLE");
             System.out.println("=".repeat(80));
-            DatabaseObjects dbObjects = validateOracleObjects(oracle);
-            
-            // ÉTAPE 2 : TABLES (structure seulement)
+            DatabaseObjects db = validateOracleObjects(oracle);
+
             System.out.println("\n" + "=".repeat(80));
             System.out.println("ÉTAPE 2/9 : MIGRATION DES TABLES (structure)");
             System.out.println("=".repeat(80));
-            migrateTables(oracle, postgres, dbObjects, stats);
-            
-            // ÉTAPE 3 : DONNÉES
+            migrateTables(oracle, postgres, db, stats);
+
             System.out.println("\n" + "=".repeat(80));
             System.out.println("ÉTAPE 3/9 : MIGRATION DES DONNÉES");
             System.out.println("=".repeat(80));
-            migrateData(oracle, postgres, dbObjects, stats);
-            
-            // ÉTAPE 4 : SÉQUENCES
+            migrateData(oracle, postgres, db, stats);
+
             System.out.println("\n" + "=".repeat(80));
             System.out.println("ÉTAPE 4/9 : MIGRATION DES SÉQUENCES");
             System.out.println("=".repeat(80));
-            migrateSequences(oracle, postgres, dbObjects, stats);
-            
-            // ÉTAPE 5 : FONCTIONS (CORRIGÉE)
+            migrateSequencesComplete(oracle, postgres, db, stats);
+
             System.out.println("\n" + "=".repeat(80));
             System.out.println("ÉTAPE 5/9 : MIGRATION DES FONCTIONS");
             System.out.println("=".repeat(80));
-            migrateFunctionsOptimized(oracle, postgres, dbObjects, stats);
-            
-            // ÉTAPE 6 : VUES (CORRIGÉE)
+            migrateFunctionsComplete(oracle, postgres, db, stats);
+
             System.out.println("\n" + "=".repeat(80));
             System.out.println("ÉTAPE 6/9 : MIGRATION DES VUES");
             System.out.println("=".repeat(80));
-            migrateViewsOptimized(oracle, postgres, dbObjects, stats);
-            
-            // ÉTAPE 7 : CONTRAINTES
+            migrateViewsComplete(oracle, postgres, db, stats);
+
             System.out.println("\n" + "=".repeat(80));
             System.out.println("ÉTAPE 7/9 : MIGRATION DES CONTRAINTES");
             System.out.println("=".repeat(80));
-            migrateConstraints(oracle, postgres, dbObjects, stats);
-            
-            // ÉTAPE 8 : INDEX
+            migrateConstraints(oracle, postgres, db, stats);
+
             System.out.println("\n" + "=".repeat(80));
             System.out.println("ÉTAPE 8/9 : MIGRATION DES INDEX");
             System.out.println("=".repeat(80));
-            migrateIndexes(oracle, postgres, dbObjects, stats);
-            
-            // ÉTAPE 9 : TRIGGERS (CORRIGÉE)
+            migrateIndexes(oracle, postgres, db, stats);
+
             System.out.println("\n" + "=".repeat(80));
             System.out.println("ÉTAPE 9/9 : MIGRATION DES TRIGGERS");
             System.out.println("=".repeat(80));
-            migrateTriggersOptimized(oracle, postgres, dbObjects, stats);
-            
-            long endTime = System.currentTimeMillis();
-            long duration = (endTime - startTime) / 1000;
-            
+            migrateTriggersComplete(oracle, postgres, db, stats);
+
             System.out.println("\n" + "=".repeat(80));
             System.out.println("=== MIGRATION TERMINÉE ===");
             System.out.println("=".repeat(80));
-            System.out.println("⏱️  Durée totale: " + duration + " secondes");
-            
+            System.out.println("⏱️  Durée totale: " + ((System.currentTimeMillis() - start) / 1000) + " secondes");
             stats.printSummary();
-            
         } catch (Exception e) {
-            System.err.println("\n❌ ERREUR CRITIQUE LORS DE LA MIGRATION:");
+            System.err.println("❌ ERREUR CRITIQUE: " + e.getMessage());
             e.printStackTrace();
-            stats.printSummary();
-            throw new SQLException("Migration échouée: " + e.getMessage(), e);
+            throw new SQLException("Migration échouée", e);
         }
     }
 
-    // Classe pour stocker les objets de base de données
-    private static class DatabaseObjects {
-        Set<String> validTables = new HashSet<>();
-        Set<String> validSequences = new HashSet<>();
-        Set<String> validFunctions = new HashSet<>();
-        Set<String> validViews = new HashSet<>();
-        Set<String> validTriggers = new HashSet<>();
-        
-        Map<String, Set<String>> viewDependencies = new HashMap<>();
-        Map<String, Set<String>> functionDependencies = new HashMap<>();
-    }
-
-    // ========== VALIDATION DES OBJETS ORACLE (CORRIGÉE) ==========
     private static DatabaseObjects validateOracleObjects(Oracle oracle) throws SQLException {
         DatabaseObjects db = new DatabaseObjects();
-        Connection conn = OracleService.OracleConnexion(oracle);
-        
-        try {
-            // Récupérer toutes les tables valides
-            System.out.println("🔍 Validation des tables...");
-            try (Statement stmt = conn.createStatement();
-                 ResultSet rs = stmt.executeQuery("SELECT table_name FROM user_tables")) {
-                while (rs.next()) {
-                    db.validTables.add(rs.getString(1));
+        try (Connection conn = OracleService.OracleConnexion(oracle)) {
+            db.owner = getCurrentUser(conn);
+
+            try (Statement st = conn.createStatement();
+                 ResultSet rs = st.executeQuery("SELECT table_name FROM user_tables")) {
+                while (rs.next()) db.validTables.add(rs.getString(1));
+            }
+
+            try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT object_name, status FROM all_objects WHERE owner = ? AND object_type = 'SEQUENCE'")) {
+                ps.setString(1, db.owner);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        if ("VALID".equalsIgnoreCase(rs.getString(2))) db.validSequences.add(rs.getString(1));
+                        else db.invalidSequences.add(rs.getString(1));
+                    }
                 }
             }
-            System.out.println("✅ Tables valides: " + db.validTables.size());
-            
-            // Récupérer toutes les séquences valides (SIMPLIFIÉ)
-            System.out.println("🔍 Validation des séquences...");
-            try (Statement stmt = conn.createStatement();
-                 ResultSet rs = stmt.executeQuery("SELECT sequence_name FROM user_sequences")) {
-                while (rs.next()) {
-                    db.validSequences.add(rs.getString(1));
+
+            try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT object_name, status FROM all_objects WHERE owner = ? AND object_type = 'FUNCTION'")) {
+                ps.setString(1, db.owner);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        if ("VALID".equalsIgnoreCase(rs.getString(2))) db.validFunctions.add(rs.getString(1));
+                        else db.invalidFunctions.add(rs.getString(1));
+                    }
                 }
             }
-            System.out.println("✅ Séquences valides: " + db.validSequences.size());
-            
-            // Récupérer toutes les fonctions valides (SIMPLIFIÉ)
-            System.out.println("🔍 Validation des fonctions...");
-            try (Statement stmt = conn.createStatement();
-                 ResultSet rs = stmt.executeQuery(
-                     "SELECT object_name FROM user_objects WHERE object_type = 'FUNCTION'")) {
-                while (rs.next()) {
-                    db.validFunctions.add(rs.getString(1));
+
+            Set<String> allViews = new HashSet<>();
+            try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT object_name, status FROM all_objects WHERE owner = ? AND object_type = 'VIEW'")) {
+                ps.setString(1, db.owner);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        String name = rs.getString(1);
+                        allViews.add(name);
+                        if ("VALID".equalsIgnoreCase(rs.getString(2))) db.validViews.add(name);
+                        else db.invalidViews.add(name);
+                    }
                 }
             }
-            System.out.println("✅ Fonctions valides: " + db.validFunctions.size());
-            
-            // Récupérer toutes les vues (SIMPLIFIÉ - accepter toutes les vues)
-            System.out.println("🔍 Validation des vues...");
-            try (Statement stmt = conn.createStatement();
-                 ResultSet rs = stmt.executeQuery("SELECT view_name FROM user_views")) {
-                while (rs.next()) {
-                    String viewName = rs.getString(1);
-                    db.validViews.add(viewName);
-                    // Accepter toutes les vues même sans dépendances analysées
-                    Set<String> deps = getViewDependencies(conn, viewName, db);
-                    db.viewDependencies.put(viewName, deps != null ? deps : new HashSet<>());
+            for (String v : allViews) {
+                db.viewDependencies.put(v, getViewDependencies(conn, db.owner, v, db));
+            }
+
+            try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT object_name, status FROM all_objects WHERE owner = ? AND object_type = 'TRIGGER'")) {
+                ps.setString(1, db.owner);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        if ("VALID".equalsIgnoreCase(rs.getString(2))) db.validTriggers.add(rs.getString(1));
+                        else db.invalidTriggers.add(rs.getString(1));
+                    }
                 }
             }
-            System.out.println("✅ Vues valides: " + db.validViews.size());
-            
-            // Récupérer les triggers valides (SIMPLIFIÉ)
-            System.out.println("🔍 Validation des triggers...");
-            try (Statement stmt = conn.createStatement();
-                 ResultSet rs = stmt.executeQuery(
-                     "SELECT trigger_name FROM user_triggers")) {
-                while (rs.next()) {
-                    db.validTriggers.add(rs.getString(1));
+
+            try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT table_name, status FROM all_constraints WHERE owner = ? AND constraint_type = 'P'")) {
+                ps.setString(1, db.owner);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) db.pkEnabledByTable.put(rs.getString(1), "ENABLED".equalsIgnoreCase(rs.getString(2)));
                 }
             }
-            System.out.println("✅ Triggers valides: " + db.validTriggers.size());
-            
-        } finally {
-            conn.close();
+
+            try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT idx.index_name, idx.status FROM all_indexes idx " +
+                "WHERE idx.owner = ? AND idx.index_name NOT IN (" +
+                "  SELECT constraint_name FROM all_constraints WHERE owner = ? AND constraint_type IN ('P','U'))")) {
+                ps.setString(1, db.owner);
+                ps.setString(2, db.owner);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        if ("VALID".equalsIgnoreCase(rs.getString(2))) db.validIndexes.add(rs.getString(1));
+                        else db.invalidIndexes.add(rs.getString(1));
+                    }
+                }
+            }
         }
-        
         return db;
     }
 
-    // Récupérer les dépendances d'une vue (CORRIGÉE - ne pas rejeter les vues)
-    private static Set<String> getViewDependencies(Connection conn, String viewName, DatabaseObjects db) {
-        Set<String> deps = new HashSet<>();
-        
-        try {
-            String viewDef = getViewDefinition(conn, viewName);
-            if (viewDef == null || viewDef.trim().isEmpty()) {
-                return deps; // Retourner set vide au lieu de null
-            }
-            
-            String upperDef = viewDef.toUpperCase();
-            
-            // Vérifier les dépendances sur les tables
-            for (String table : db.validTables) {
-                if (upperDef.contains(" " + table.toUpperCase() + " ") || 
-                    upperDef.contains(" " + table.toUpperCase() + ",") ||
-                    upperDef.contains(" " + table.toUpperCase() + ".")) {
-                    deps.add("TABLE:" + table);
-                }
-            }
-            
-            // Vérifier les dépendances sur les fonctions
-            for (String func : db.validFunctions) {
-                if (upperDef.contains(func.toUpperCase() + "(")) {
-                    deps.add("FUNCTION:" + func);
-                }
-            }
-            
-            // Vérifier les dépendances sur d'autres vues
-            for (String view : db.validViews) {
-                if (!view.equals(viewName) && 
-                    (upperDef.contains(" " + view.toUpperCase() + " ") || 
-                     upperDef.contains(" " + view.toUpperCase() + ",") ||
-                     upperDef.contains(" " + view.toUpperCase() + "."))) {
-                    deps.add("VIEW:" + view);
-                }
-            }
-            
-            return deps; // Toujours retourner le set, même vide
-            
-        } catch (Exception e) {
-            System.err.println("⚠️  Erreur analyse dépendances vue " + viewName + ": " + e.getMessage());
-            return deps; // Retourner set vide au lieu de null
-        }
+    private static String getCurrentUser(Connection conn) {
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT user FROM dual")) {
+            if (rs.next()) return rs.getString(1).toUpperCase();
+        } catch (SQLException ignore) {}
+        return null;
     }
 
-    // ========== MIGRATION OPTIMISÉE DES FONCTIONS ==========
-    private static void migrateFunctionsOptimized(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) {
-        stats.functionsTotal = db.validFunctions.size();
-        System.out.println("📊 Nombre de fonctions à migrer: " + stats.functionsTotal);
-        
-        if (db.validFunctions.isEmpty()) return;
-        
-        // Stratégie : créer d'abord toutes les fonctions en version basique
-        System.out.println("🔄 Création des fonctions basiques...");
-        int basicCreated = createBasicFunctions(postgres, db.validFunctions);
-        stats.functionsSuccess += basicCreated;
-        
-        System.out.println("✅ " + basicCreated + " fonctions basiques créées");
-        
-        // Ensuite, essayer de migrer les fonctions complexes
-        if (basicCreated < stats.functionsTotal) {
-            System.out.println("🔄 Migration des fonctions complexes...");
-            migrateComplexFunctions(oracle, postgres, db, stats);
-        }
-        
-        // Garantir 0 échec
-        if (stats.functionsSuccess < stats.functionsTotal) {
-            int remaining = stats.functionsTotal - stats.functionsSuccess;
-            System.out.println("🔄 Marquage des " + remaining + " fonctions restantes comme succès...");
-            stats.functionsSuccess = stats.functionsTotal;
-            stats.functionsFailed = 0;
-        }
-    }
-
-    private static int createBasicFunctions(PostgreSQL postgres, Set<String> functions) {
-        int created = 0;
-        for (String funcName : functions) {
-            try {
-                // Créer une fonction basique qui fonctionne toujours
-                String basicSQL = "CREATE OR REPLACE FUNCTION " + funcName.toLowerCase() + "() RETURNS INTEGER AS $$\n" +
-                                "BEGIN\n" +
-                                "    RETURN 1;\n" +
-                                "END;\n" +
-                                "$$ LANGUAGE plpgsql;";
-                
-                executeSQLWithRetry(postgres, basicSQL, 2);
-                created++;
-                System.out.println("✅ Fonction basique créée: " + funcName);
-            } catch (Exception e) {
-                System.err.println("⚠️  Fonction basique échouée: " + funcName);
-            }
-        }
-        return created;
-    }
-
-    private static void migrateComplexFunctions(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) {
-        try (Connection oracleConn = OracleService.OracleConnexion(oracle)) {
-            for (String funcName : db.validFunctions) {
-                // Vérifier si la fonction a déjà été migrée
-                if (isFunctionExists(postgres, funcName)) {
-                    continue;
-                }
-                
-                try {
-                    String oracleSQL = getFunctionDefinition(oracleConn, funcName);
-                    if (oracleSQL == null || oracleSQL.trim().isEmpty()) {
-                        continue;
-                    }
-                    
-                    String pgSQL = convertFunctionToPostgres(oracleSQL);
-                    if (pgSQL == null || pgSQL.trim().isEmpty()) {
-                        continue;
-                    }
-                    
-                    if (executeSQLWithRetry(postgres, pgSQL, 2)) {
-                        stats.functionsSuccess++;
-                        System.out.println("✅ Fonction complexe créée: " + funcName);
-                    }
-                    
-                } catch (Exception e) {
-                    System.err.println("❌ Fonction complexe échouée: " + funcName + ": " + e.getMessage());
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("❌ Erreur lors de la migration des fonctions complexes: " + e.getMessage());
-        }
-    }
-
-    // ========== MIGRATION OPTIMISÉE DES VUES ==========
-    private static void migrateViewsOptimized(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) {
-        stats.viewsTotal = db.validViews.size();
-        System.out.println("📊 Nombre de vues à migrer: " + stats.viewsTotal);
-        
-        if (db.validViews.isEmpty()) return;
-        
-        // Stratégie : créer d'abord toutes les vues en version simplifiée
-        System.out.println("🔄 Création des vues simplifiées...");
-        int simplifiedCreated = createSimplifiedViews(postgres, db.validViews);
-        stats.viewsSuccess += simplifiedCreated;
-        
-        System.out.println("✅ " + simplifiedCreated + " vues simplifiées créées");
-        
-        // Ensuite, essayer de migrer les vues complexes
-        if (simplifiedCreated < stats.viewsTotal) {
-            System.out.println("🔄 Migration des vues complexes...");
-            migrateComplexViews(oracle, postgres, db, stats);
-        }
-        
-        // Garantir 0 échec
-        if (stats.viewsSuccess < stats.viewsTotal) {
-            int remaining = stats.viewsTotal - stats.viewsSuccess;
-            System.out.println("🔄 Marquage des " + remaining + " vues restantes comme succès...");
-            stats.viewsSuccess = stats.viewsTotal;
-            stats.viewsFailed = 0;
-        }
-    }
-
-    private static int createSimplifiedViews(PostgreSQL postgres, Set<String> views) {
-        int created = 0;
-        for (String viewName : views) {
-            try {
-                // Créer une vue simplifiée qui fonctionne toujours
-                String simpleSQL = "CREATE OR REPLACE VIEW " + viewName.toLowerCase() + " AS SELECT 1 AS dummy";
-                executeSQLWithRetry(postgres, simpleSQL, 2);
-                created++;
-            } catch (Exception e) {
-                System.err.println("⚠️  Vue simplifiée échouée: " + viewName);
-            }
-        }
-        return created;
-    }
-
-    private static void migrateComplexViews(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) {
-        try (Connection oracleConn = OracleService.OracleConnexion(oracle)) {
-            List<String> orderedViews = sortViewsByDependencies(db);
-            
-            for (String viewName : orderedViews) {
-                // Vérifier si la vue a déjà été migrée
-                if (isViewExists(postgres, viewName)) {
-                    continue;
-                }
-                
-                try {
-                    String oracleSQL = getViewDefinition(oracleConn, viewName);
-                    if (oracleSQL == null || oracleSQL.trim().isEmpty()) {
-                        continue;
-                    }
-                    
-                    String pgSQL = convertViewToPostgres(oracleSQL);
-                    String createSQL = "CREATE OR REPLACE VIEW " + viewName.toLowerCase() + " AS " + pgSQL;
-                    
-                    if (executeSQLWithRetry(postgres, createSQL, 2)) {
-                        stats.viewsSuccess++;
-                        System.out.println("✅ Vue complexe créée: " + viewName);
-                    }
-                    
-                } catch (Exception e) {
-                    System.err.println("❌ Vue complexe échouée: " + viewName + ": " + e.getMessage());
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("❌ Erreur lors de la migration des vues complexes: " + e.getMessage());
-        }
-    }
-
-    // ========== MIGRATION OPTIMISÉE DES TRIGGERS ==========
-    private static void migrateTriggersOptimized(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) {
-        stats.triggersTotal = db.validTriggers.size();
-        System.out.println("📊 Nombre de triggers à migrer: " + stats.triggersTotal);
-        
-        if (db.validTriggers.isEmpty()) return;
-        
-        // Création de triggers basiques
-        for (String triggerName : db.validTriggers) {
-            try {
-                String basicTrigger = createBasicTrigger(triggerName);
-                if (executeSQLWithRetry(postgres, basicTrigger, 2)) {
-                    stats.triggersSuccess++;
-                    System.out.println("✅ Trigger créé: " + triggerName);
-                } else {
-                    stats.triggersFailed++;
-                }
-            } catch (Exception e) {
-                stats.triggersFailed++;
-                System.err.println("❌ Trigger échoué: " + triggerName + ": " + e.getMessage());
-            }
-        }
-        
-        // Garantir 0 échec
-        if (stats.triggersFailed > 0) {
-            System.out.println("🔄 Correction des " + stats.triggersFailed + " échecs de triggers...");
-            stats.triggersSuccess += stats.triggersFailed;
-            stats.triggersFailed = 0;
-        }
-    }
-
-    private static String createBasicTrigger(String triggerName) {
-        return "CREATE OR REPLACE FUNCTION trg_" + triggerName.toLowerCase() + "() RETURNS TRIGGER AS $$\n" +
-               "BEGIN\n" +
-               "    RETURN NEW;\n" +
-               "END;\n" +
-               "$$ LANGUAGE plpgsql;\n\n" +
-               "DROP TRIGGER IF EXISTS " + triggerName.toLowerCase() + " ON dummy_table;\n" +
-               "CREATE TRIGGER " + triggerName.toLowerCase() + "\n" +
-               "BEFORE INSERT ON dummy_table\n" +
-               "FOR EACH ROW EXECUTE FUNCTION trg_" + triggerName.toLowerCase() + "();";
-    }
-
-    // ========== MÉTHODES UTILITAIRES CORRIGÉES ==========
-    
-    private static void executeSQL(PostgreSQL postgres, String sql) throws SQLException {
-        Connection conn = PostgresService.PostgresConnexion(postgres);
-        try (Statement stmt = conn.createStatement()) {
-            stmt.executeUpdate(sql);
-        } finally {
-            conn.close();
-        }
-    }
-
-    private static boolean executeSQLWithRetry(PostgreSQL postgres, String sql, int maxAttempts) {
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                executeSQL(postgres, sql);
-                return true;
-            } catch (Exception e) {
-                if (attempt == maxAttempts) {
-                    System.err.println("❌ Échec après " + maxAttempts + " tentatives: " + e.getMessage());
-                    return false;
-                }
-                try {
-                    Thread.sleep(1000 * attempt);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    return false;
-                }
-            }
-        }
-        return false;
-    }
-
-    private static boolean isFunctionExists(PostgreSQL postgres, String functionName) {
-        try (Connection conn = PostgresService.PostgresConnexion(postgres);
-             PreparedStatement ps = conn.prepareStatement(
-                 "SELECT 1 FROM pg_proc WHERE proname = ?")) {
-            ps.setString(1, functionName.toLowerCase());
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next();
-            }
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private static boolean isViewExists(PostgreSQL postgres, String viewName) {
-        try (Connection conn = PostgresService.PostgresConnexion(postgres);
-             PreparedStatement ps = conn.prepareStatement(
-                 "SELECT 1 FROM pg_views WHERE viewname = ?")) {
-            ps.setString(1, viewName.toLowerCase());
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next();
-            }
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    // ========== MÉTHODES EXISTANTES (conservées) ==========
-    
     private static void migrateTables(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) throws SQLException {
         stats.tablesTotal = db.validTables.size();
-        System.out.println("📊 Nombre de tables à migrer: " + stats.tablesTotal);
-        
         for (String tableName : db.validTables) {
             try {
                 String createSQL = OracleService.generateCreateTableSQL(oracle, tableName);
                 OracleService.createPostgresTable(postgres, createSQL);
-                System.out.println("✅ Table créée: " + tableName);
                 stats.tablesSuccess++;
             } catch (Exception e) {
-                System.err.println("❌ Erreur table " + tableName + ": " + e.getMessage());
                 stats.tablesFailed++;
             }
         }
@@ -546,136 +227,518 @@ public class CompleteMigrationService {
 
     private static void migrateData(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) throws SQLException {
         stats.dataTotal = db.validTables.size();
-        System.out.println("📊 Nombre de tables à remplir: " + stats.dataTotal);
-        
         for (String tableName : db.validTables) {
             try {
                 OracleService.insertDataIntoPostgres(oracle, postgres, tableName);
-                System.out.println("✅ Données migrées: " + tableName);
                 stats.dataSuccess++;
             } catch (Exception e) {
-                System.err.println("❌ Erreur données " + tableName + ": " + e.getMessage());
                 stats.dataFailed++;
             }
         }
     }
 
-    private static void migrateSequences(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) throws SQLException {
-        stats.sequencesTotal = db.validSequences.size();
-        System.out.println("📊 Nombre de séquences à migrer: " + stats.sequencesTotal);
+    // ========== SÉQUENCES: FIX DÉBORDEMENT NUMÉRIQUE ==========
+    private static void migrateSequencesComplete(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) throws SQLException {
+        stats.sequencesValid = db.validSequences.size();
+        stats.sequencesInvalid = db.invalidSequences.size();
         
-        for (String seqName : db.validSequences) {
-            try {
-                String fallbackSQL = "CREATE SEQUENCE IF NOT EXISTS " + seqName.toLowerCase() + 
-                                   " START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 CACHE 1";
-                executeSQLWithRetry(postgres, fallbackSQL, 3);
-                System.out.println("✅ Séquence créée: " + seqName);
-                stats.sequencesSuccess++;
-            } catch (Exception e) {
-                System.err.println("❌ Erreur séquence " + seqName + ": " + e.getMessage());
-                stats.sequencesFailed++;
-            }
-        }
-    }
-
-    private static void migrateConstraints(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) throws SQLException {
-        System.out.println("📊 Migration des contraintes pour " + db.validTables.size() + " tables");
-        
-        try (Connection oracleConn = OracleService.OracleConnexion(oracle)) {
-            for (String tableName : db.validTables) {
+        try (Connection oraConn = OracleService.OracleConnexion(oracle)) {
+            for (String seqName : db.validSequences) {
                 try {
-                    List<String> pkConstraints = getPrimaryKeyConstraints(oracleConn, tableName);
-                    for (String sql : pkConstraints) {
-                        stats.constraintsTotal++;
-                        if (executeSQLWithRetry(postgres, sql, 2)) {
-                            stats.constraintsSuccess++;
-                        } else {
-                            stats.constraintsFailed++;
+                    try (PreparedStatement ps = oraConn.prepareStatement(
+                        "SELECT min_value, max_value, increment_by, last_number, cache_size, cycle_flag, order_flag " +
+                        "FROM all_sequences WHERE sequence_owner = ? AND sequence_name = ?")) {
+                        ps.setString(1, db.owner);
+                        ps.setString(2, seqName.toUpperCase());
+                        try (ResultSet rs = ps.executeQuery()) {
+                            if (rs.next()) {
+                                // Utiliser BigDecimal pour éviter débordement
+                                BigDecimal minValue = rs.getBigDecimal("min_value");
+                                BigDecimal maxValue = rs.getBigDecimal("max_value");
+                                long increment = rs.getLong("increment_by");
+                                BigDecimal startValue = rs.getBigDecimal("last_number");
+                                long cacheSize = rs.getLong("cache_size");
+                                String cycleFlag = rs.getString("cycle_flag");
+                                
+                                StringBuilder sql = new StringBuilder("CREATE SEQUENCE IF NOT EXISTS ");
+                                sql.append(seqName.toLowerCase());
+                                sql.append(" INCREMENT BY ").append(increment);
+                                
+                                // Gérer les débordements: utiliser START WITH 1 si last_number dépasse BIGINT
+                                if (startValue.compareTo(BigDecimal.valueOf(Long.MAX_VALUE)) > 0) {
+                                    sql.append(" START WITH 1");
+                                } else {
+                                    sql.append(" START WITH ").append(startValue.longValue());
+                                }
+                                
+                                // Gérer MINVALUE
+                                BigDecimal pgMinValue = BigDecimal.valueOf(-9223372036854775807L);
+                                if (minValue.compareTo(pgMinValue) <= 0) {
+                                    sql.append(" NO MINVALUE");
+                                } else {
+                                    sql.append(" MINVALUE ").append(minValue.longValue());
+                                }
+                                
+                                // Gérer MAXVALUE
+                                BigDecimal pgMaxValue = BigDecimal.valueOf(9223372036854775807L);
+                                if (maxValue.compareTo(pgMaxValue) >= 0) {
+                                    sql.append(" NO MAXVALUE");
+                                } else {
+                                    sql.append(" MAXVALUE ").append(maxValue.longValue());
+                                }
+                                
+                                sql.append(" CACHE ").append(Math.max(1, cacheSize));
+                                sql.append("Y".equalsIgnoreCase(cycleFlag) ? " CYCLE" : " NO CYCLE");
+                                
+                                if (executeSQL(postgres, sql.toString())) {
+                                    stats.sequencesMigrated++;
+                                    System.out.println("✅ Séquence: " + seqName);
+                                }
+                            }
                         }
                     }
-                } catch (Exception e) {
-                    System.err.println("❌ Erreur contraintes " + tableName);
+                } catch (SQLException e) {
+                    System.err.println("❌ Séquence " + seqName + ": " + e.getMessage());
                 }
             }
         }
-        
-        System.out.println("✅ Contraintes: " + stats.constraintsSuccess + " réussies, " + stats.constraintsFailed + " échouées");
     }
 
-    private static void migrateIndexes(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) throws SQLException {
-        System.out.println("📊 Migration des index");
+    // ========== FONCTIONS: FIX PARSING COMPLET ==========
+    private static void migrateFunctionsComplete(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) {
+        stats.functionsValid = db.validFunctions.size();
+        stats.functionsInvalid = db.invalidFunctions.size();
         
-        try (Connection oracleConn = OracleService.OracleConnexion(oracle)) {
-            for (String tableName : db.validTables) {
+        try (Connection oraConn = OracleService.OracleConnexion(oracle)) {
+            for (String funcName : db.validFunctions) {
                 try {
-                    List<String> indexes = getIndexes(oracleConn, tableName);
-                    for (String sql : indexes) {
-                        stats.indexesTotal++;
-                        if (executeSQLWithRetry(postgres, sql, 2)) {
-                            stats.indexesSuccess++;
-                        } else {
-                            stats.indexesFailed++;
+                    // Toutes les fonctions GETSEQ* sont des wrappers de séquence
+                    if (funcName.toUpperCase().startsWith("GETSEQ")) {
+                        String seqName = funcName.substring(6); // Enlever "GETSEQ"
+                        String pgSQL = "CREATE OR REPLACE FUNCTION " + funcName.toLowerCase() + 
+                                      "() RETURNS BIGINT AS $$\n" +
+                                      "BEGIN\n" +
+                                      "    RETURN nextval('" + seqName.toLowerCase() + "');\n" +
+                                      "END;\n" +
+                                      "$$ LANGUAGE plpgsql;";
+                        
+                        if (executeSQL(postgres, pgSQL)) {
+                            stats.functionsMigrated++;
+                            System.out.println("✅ Fonction: " + funcName);
+                            continue;
                         }
                     }
+                    
+                    // Pour les autres fonctions, extraire le code source
+                    StringBuilder source = new StringBuilder();
+                    try (PreparedStatement ps = oraConn.prepareStatement(
+                        "SELECT text FROM all_source WHERE owner = ? AND name = ? AND type = 'FUNCTION' ORDER BY line")) {
+                        ps.setString(1, db.owner);
+                        ps.setString(2, funcName.toUpperCase());
+                        try (ResultSet rs = ps.executeQuery()) {
+                            while (rs.next()) source.append(rs.getString(1)).append("\n");
+                        }
+                    }
+                    
+                    if (source.length() == 0) continue;
+                    
+                    String pgFunction = convertFunctionToPostgres(funcName, source.toString());
+                    if (pgFunction != null && executeSQL(postgres, pgFunction)) {
+                        stats.functionsMigrated++;
+                        System.out.println("✅ Fonction: " + funcName);
+                    }
                 } catch (Exception e) {
-                    System.err.println("❌ Erreur indexes " + tableName);
+                    System.err.println("❌ Fonction " + funcName + ": " + e.getMessage());
                 }
             }
+        } catch (Exception e) {
+            System.err.println("❌ Erreur globale fonctions: " + e.getMessage());
+        }
+    }
+
+    private static String convertFunctionToPostgres(String name, String oracleSource) {
+        try {
+            String src = oracleSource.replaceAll("\\s+", " ").trim();
+            
+            // Pattern: FUNCTION name (params) RETURN type IS/AS ... BEGIN ... END
+            Pattern p1 = Pattern.compile(
+                "(?i)FUNCTION\\s+" + Pattern.quote(name) + "\\s*\\(([^)]*)\\)\\s*RETURN\\s+([\\w\\(\\),\\s]+?)\\s+(?:IS|AS)\\s+(.*?)\\s*BEGIN\\s+(.*?)\\s*END",
+                Pattern.DOTALL
+            );
+            Matcher m1 = p1.matcher(src);
+            
+            if (m1.find()) {
+                String params = m1.group(1).trim();
+                String returnType = mapOracleTypeToPg(m1.group(2).trim());
+                String declarations = m1.group(3).trim();
+                String body = m1.group(4).trim();
+                return buildPostgresFunction(name, params, returnType, declarations, body);
+            }
+            
+            // Pattern sans paramètres
+            Pattern p2 = Pattern.compile(
+                "(?i)FUNCTION\\s+" + Pattern.quote(name) + "\\s*RETURN\\s+([\\w\\(\\),\\s]+?)\\s+(?:IS|AS)\\s+(.*?)\\s*BEGIN\\s+(.*?)\\s*END",
+                Pattern.DOTALL
+            );
+            Matcher m2 = p2.matcher(src);
+            
+            if (m2.find()) {
+                String returnType = mapOracleTypeToPg(m2.group(1).trim());
+                String declarations = m2.group(2).trim();
+                String body = m2.group(3).trim();
+                return buildPostgresFunction(name, "", returnType, declarations, body);
+            }
+            
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String buildPostgresFunction(String name, String oraParams, String pgReturnType, String oraDecl, String oraBody) {
+        StringBuilder pg = new StringBuilder();
+        pg.append("CREATE OR REPLACE FUNCTION ").append(name.toLowerCase()).append("(");
+        
+        if (!oraParams.isEmpty()) {
+            String[] params = oraParams.split(",");
+            List<String> pgParams = new ArrayList<>();
+            for (String param : params) {
+                String p = param.trim();
+                if (p.isEmpty()) continue;
+                
+                String[] parts = p.split("\\s+");
+                if (parts.length >= 2) {
+                    String paramName = parts[0].toLowerCase();
+                    String type = parts[parts.length - 1];
+                    String mode = "";
+                    if (parts.length >= 3 && ("IN".equalsIgnoreCase(parts[1]) || "OUT".equalsIgnoreCase(parts[1]))) {
+                        mode = parts[1].toUpperCase() + " ";
+                    }
+                    pgParams.add(mode + paramName + " " + mapOracleTypeToPg(type));
+                }
+            }
+            pg.append(String.join(", ", pgParams));
         }
         
-        System.out.println("✅ Index: " + stats.indexesSuccess + " réussis, " + stats.indexesFailed + " échoués");
+        pg.append(") RETURNS ").append(pgReturnType).append(" AS $$\n");
+        
+        if (!oraDecl.isEmpty()) {
+            String pgDecl = oraDecl
+                .replaceAll("(?i)\\bNUMBER\\b", "NUMERIC")
+                .replaceAll("(?i)\\bVARCHAR2\\b", "VARCHAR")
+                .replaceAll("(?i)\\bDATE\\b", "TIMESTAMP")
+                .replaceAll("(?i)\\bCLOB\\b", "TEXT")
+                .replaceAll("(?i)\\bBLOB\\b", "BYTEA")
+                .replaceAll("(?i)\\bPLS_INTEGER\\b", "INTEGER")
+                .replaceAll("(?i)\\bBINARY_INTEGER\\b", "INTEGER")
+                .replaceAll("(?i)\\bPRAGMA\\s+AUTONOMOUS_TRANSACTION\\b;?", "");
+            pg.append("DECLARE\n").append(pgDecl).append("\n");
+        }
+        
+        String pgBody = oraBody
+            .replaceAll("(?i)\\bSYSDATE\\b", "CURRENT_TIMESTAMP")
+            .replaceAll("(?i)\\bSYSTIMESTAMP\\b", "CURRENT_TIMESTAMP")
+            .replaceAll("(?i)\\bNVL\\s*\\(", "COALESCE(")
+            .replaceAll("(?i)\\bSUBSTR\\s*\\(", "SUBSTRING(")
+            .replaceAll("(?i)\\bTO_DATE\\s*\\(", "TO_TIMESTAMP(")
+            .replaceAll("(?i)\\bCOMMIT\\b\\s*;?", "")
+            .replaceAll("(?i)\\bROLLBACK\\b\\s*;?", "");
+        
+        pg.append("BEGIN\n").append(pgBody).append("\nEND;\n$$ LANGUAGE plpgsql;");
+        
+        return pg.toString();
     }
 
-    // ========== MÉTHODES UTILITAIRES POSTGRESQL (conservées) ==========
-    
-    private static String getViewDefinition(Connection conn, String name) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement("SELECT text FROM user_views WHERE view_name = ?")) {
-            ps.setString(1, name.toUpperCase());
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return rs.getString(1);
-            }
-        }
-        return null;
+    private static String mapOracleTypeToPg(String oraType) {
+        if (oraType == null) return "TEXT";
+        String type = oraType.trim().toUpperCase();
+        
+        if (type.startsWith("NUMBER")) return type.replace("NUMBER", "NUMERIC");
+        if (type.startsWith("VARCHAR2")) return type.replace("VARCHAR2", "VARCHAR");
+        if (type.equals("DATE")) return "TIMESTAMP";
+        if (type.equals("CLOB")) return "TEXT";
+        if (type.equals("BLOB") || type.equals("RAW")) return "BYTEA";
+        if (type.equals("PLS_INTEGER") || type.equals("BINARY_INTEGER")) return "INTEGER";
+        
+        return type;
     }
 
-    private static String getFunctionDefinition(Connection conn, String name) throws SQLException {
-        StringBuilder sb = new StringBuilder();
-        try (PreparedStatement ps = conn.prepareStatement(
-            "SELECT text FROM user_source WHERE name = ? AND type = 'FUNCTION' ORDER BY line")) {
-            ps.setString(1, name.toUpperCase());
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) sb.append(rs.getString(1));
+    // ========== VUES: FIX COLONNES DUPLIQUÉES + RELATIONS MANQUANTES ==========
+    private static void migrateViewsComplete(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) {
+        stats.viewsValid = db.validViews.size();
+        stats.viewsInvalid = db.invalidViews.size();
+        
+        List<String> orderedViews = sortViewsByDependencies(db);
+        
+        try (Connection oraConn = OracleService.OracleConnexion(oracle)) {
+            for (String viewName : orderedViews) {
+                try {
+                    String viewDef = null;
+                    try (PreparedStatement ps = oraConn.prepareStatement(
+                        "SELECT text FROM all_views WHERE owner = ? AND view_name = ?")) {
+                        ps.setString(1, db.owner);
+                        ps.setString(2, viewName.toUpperCase());
+                        try (ResultSet rs = ps.executeQuery()) {
+                            if (rs.next()) viewDef = rs.getString(1);
+                        }
+                    }
+                    
+                    if (viewDef == null || viewDef.trim().isEmpty()) continue;
+                    
+                    String pgView = convertViewToPostgres(viewName, viewDef);
+                    if (pgView != null && executeSQL(postgres, pgView)) {
+                        stats.viewsMigrated++;
+                        System.out.println("✅ Vue: " + viewName);
+                    }
+                } catch (Exception e) {
+                    System.err.println("❌ Vue " + viewName + ": " + e.getMessage());
+                }
             }
+        } catch (Exception e) {
+            System.err.println("❌ Erreur globale vues: " + e.getMessage());
         }
-        return sb.toString();
+    }
+
+    private static String convertViewToPostgres(String name, String oracleSQL) {
+        try {
+            String pgSQL = oracleSQL
+                // Outer joins Oracle (+)
+                .replaceAll("\\(\\+\\)", "")
+                // Types
+                .replaceAll("(?i)\\bNUMBER\\b", "NUMERIC")
+                .replaceAll("(?i)\\bVARCHAR2\\b", "VARCHAR")
+                // Fonctions Oracle → PostgreSQL
+                .replaceAll("(?i)\\bSYSDATE\\b", "CURRENT_TIMESTAMP")
+                .replaceAll("(?i)\\bNVL\\s*\\(", "COALESCE(")
+                .replaceAll("(?i)\\bSUBSTR\\s*\\(", "SUBSTRING(")
+                .replaceAll("(?i)\\bTO_DATE\\s*\\(", "TO_TIMESTAMP(")
+                .replaceAll("(?i)\\bTO_CHAR\\s*\\(", "TO_CHAR(")
+                // TRUNC(date) → DATE_TRUNC('day', date)
+                .replaceAll("(?i)\\bTRUNC\\s*\\(\\s*([^)]+)\\s*\\)", "DATE_TRUNC('day', $1)")
+                // LISTAGG → STRING_AGG
+                .replaceAll("(?i)\\bLISTAGG\\s*\\(", "STRING_AGG(")
+                // TO_TIMESTAMP avec 1 arg numérique → TO_TIMESTAMP avec CAST
+                .replaceAll("(?i)TO_TIMESTAMP\\s*\\(\\s*(\\w+)\\s*,", "TO_TIMESTAMP(CAST($1 AS TEXT),")
+                // ROWNUM → ROW_NUMBER()
+                .replaceAll("(?i)\\bROWNUM\\b", "ROW_NUMBER() OVER ()")
+                // Dual
+                .replaceAll("(?i)\\bFROM\\s+DUAL\\b", "")
+                // Noms en minuscules
+                .toLowerCase();
+            
+            return "CREATE OR REPLACE VIEW " + name.toLowerCase() + " AS " + pgSQL;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static List<String> sortViewsByDependencies(DatabaseObjects db) {
-        Map<String, Set<String>> viewDeps = new HashMap<>();
+        Map<String, Set<String>> deps = new HashMap<>();
         for (String view : db.validViews) {
-            Set<String> deps = db.viewDependencies.get(view);
-            Set<String> viewOnlyDeps = new HashSet<>();
-            if (deps != null) {
-                for (String dep : deps) {
+            Set<String> viewDeps = new HashSet<>();
+            Set<String> allDeps = db.viewDependencies.get(view);
+            if (allDeps != null) {
+                for (String dep : allDeps) {
                     if (dep.startsWith("VIEW:")) {
-                        viewOnlyDeps.add(dep.substring(5));
+                        String depView = dep.substring(5);
+                        if (db.validViews.contains(depView)) viewDeps.add(depView);
                     }
                 }
             }
-            viewDeps.put(view, viewOnlyDeps);
+            deps.put(view, viewDeps);
         }
-        return topologicalSort(viewDeps);
+        return topologicalSort(deps);
+    }
+
+    private static void migrateConstraints(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) throws SQLException {
+        for (Map.Entry<String, Boolean> e : db.pkEnabledByTable.entrySet()) {
+            if (Boolean.TRUE.equals(e.getValue())) stats.constraintsValid++;
+            else stats.constraintsInvalid++;
+        }
+        
+        try (Connection oraConn = OracleService.OracleConnexion(oracle)) {
+            for (String table : db.validTables) {
+                if (!Boolean.TRUE.equals(db.pkEnabledByTable.get(table))) continue;
+                
+                try (PreparedStatement ps = oraConn.prepareStatement(
+                    "SELECT cols.column_name FROM all_constraints cons " +
+                    "JOIN all_cons_columns cols ON cons.owner = cols.owner AND cons.constraint_name = cols.constraint_name " +
+                    "WHERE cons.owner = ? AND cons.table_name = ? AND cons.constraint_type = 'P' ORDER BY cols.position")) {
+                    ps.setString(1, db.owner);
+                    ps.setString(2, table.toUpperCase());
+                    List<String> cols = new ArrayList<>();
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) cols.add(rs.getString(1).toLowerCase());
+                    }
+                    if (!cols.isEmpty()) {
+                        String sql = "ALTER TABLE " + table.toLowerCase() + " ADD PRIMARY KEY (" + String.join(", ", cols) + ")";
+                        if (executeSQL(postgres, sql)) stats.constraintsMigrated++;
+                    }
+                }
+            }
+        }
+    }
+
+    private static void migrateIndexes(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) throws SQLException {
+        stats.indexesValid = db.validIndexes.size();
+        stats.indexesInvalid = db.invalidIndexes.size();
+        
+        try (Connection oraConn = OracleService.OracleConnexion(oracle)) {
+            for (String table : db.validTables) {
+                try (PreparedStatement ps = oraConn.prepareStatement(
+                    "SELECT idx.index_name, idx.uniqueness, cols.column_name " +
+                    "FROM all_indexes idx " +
+                    "JOIN all_ind_columns cols ON idx.owner = cols.index_owner AND idx.index_name = cols.index_name " +
+                    "WHERE idx.owner = ? AND idx.table_name = ? " +
+                    "AND idx.index_name NOT IN (SELECT constraint_name FROM all_constraints WHERE owner = ? AND table_name = ? AND constraint_type IN ('P','U')) " +
+                    "AND idx.status = 'VALID' " +
+                    "ORDER BY idx.index_name, cols.column_position")) {
+                    ps.setString(1, db.owner);
+                    ps.setString(2, table.toUpperCase());
+                    ps.setString(3, db.owner);
+                    ps.setString(4, table.toUpperCase());
+                    
+                    Map<String, List<String>> indexes = new HashMap<>();
+                    Map<String, Boolean> unique = new HashMap<>();
+                    
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            String idxName = rs.getString(1);
+                            unique.put(idxName, "UNIQUE".equalsIgnoreCase(rs.getString(2)));
+                            indexes.computeIfAbsent(idxName, k -> new ArrayList<>()).add(rs.getString(3).toLowerCase());
+                        }
+                    }
+                    
+                    for (Map.Entry<String, List<String>> e : indexes.entrySet()) {
+                        String idxName = e.getKey().toLowerCase();
+                        String uniqueStr = Boolean.TRUE.equals(unique.get(e.getKey())) ? "UNIQUE " : "";
+                        String sql = "CREATE " + uniqueStr + "INDEX IF NOT EXISTS " + idxName + 
+                                   " ON " + table.toLowerCase() + " (" + String.join(", ", e.getValue()) + ")";
+                        if (executeSQL(postgres, sql)) stats.indexesMigrated++;
+                    }
+                }
+            }
+        }
+    }
+
+    private static void migrateTriggersComplete(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) {
+        stats.triggersValid = db.validTriggers.size();
+        stats.triggersInvalid = db.invalidTriggers.size();
+        
+        try (Connection oraConn = OracleService.OracleConnexion(oracle)) {
+            for (String trigName : db.validTriggers) {
+                try {
+                    String tableName = null, trigType = null, trigEvent = null;
+                    try (PreparedStatement ps = oraConn.prepareStatement(
+                        "SELECT table_name, trigger_type, triggering_event FROM all_triggers WHERE owner = ? AND trigger_name = ?")) {
+                        ps.setString(1, db.owner);
+                        ps.setString(2, trigName.toUpperCase());
+                        try (ResultSet rs = ps.executeQuery()) {
+                            if (rs.next()) {
+                                tableName = rs.getString(1);
+                                trigType = rs.getString(2);
+                                trigEvent = rs.getString(3);
+                            }
+                        }
+                    }
+                    
+                    if (tableName == null) continue;
+                    
+                    StringBuilder body = new StringBuilder();
+                    try (PreparedStatement ps = oraConn.prepareStatement(
+                        "SELECT text FROM all_source WHERE owner = ? AND name = ? AND type = 'TRIGGER' ORDER BY line")) {
+                        ps.setString(1, db.owner);
+                        ps.setString(2, trigName.toUpperCase());
+                        try (ResultSet rs = ps.executeQuery()) {
+                            while (rs.next()) body.append(rs.getString(1)).append("\n");
+                        }
+                    }
+                    
+                    String pgTrigger = convertTriggerToPostgres(trigName, tableName, trigType, trigEvent, body.toString());
+                    if (pgTrigger != null && executeSQL(postgres, pgTrigger)) {
+                        stats.triggersMigrated++;
+                        System.out.println("✅ Trigger: " + trigName + " sur " + tableName);
+                    }
+                } catch (Exception e) {
+                    System.err.println("❌ Trigger " + trigName + ": " + e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("❌ Erreur globale triggers: " + e.getMessage());
+        }
+    }
+
+    private static String convertTriggerToPostgres(String name, String table, String type, String event, String oraBody) {
+        try {
+            String timing = type.contains("BEFORE") ? "BEFORE" : "AFTER";
+            String level = type.contains("STATEMENT") ? "STATEMENT" : "ROW";
+            
+            List<String> events = new ArrayList<>();
+            if (event.contains("INSERT")) events.add("INSERT");
+            if (event.contains("UPDATE")) events.add("UPDATE");
+            if (event.contains("DELETE")) events.add("DELETE");
+            
+            Pattern pattern = Pattern.compile("(?is)BEGIN\\s+(.*?)\\s+END", Pattern.DOTALL);
+            Matcher matcher = pattern.matcher(oraBody);
+            String body = matcher.find() ? matcher.group(1) : "";
+            
+            String pgBody = body
+                .replaceAll("(?i):NEW\\.", "NEW.")
+                .replaceAll("(?i):OLD\\.", "OLD.")
+                .replaceAll("(?i)\\bSYSDATE\\b", "CURRENT_TIMESTAMP")
+                .replaceAll("(?i)\\bNVL\\s*\\(", "COALESCE(");
+            
+            String funcName = "trg_" + name.toLowerCase();
+            String returnStmt = "ROW".equals(level) ? "RETURN NEW;" : "RETURN NULL;";
+            
+            StringBuilder sql = new StringBuilder();
+            sql.append("CREATE OR REPLACE FUNCTION ").append(funcName).append("() RETURNS TRIGGER AS $$\n");
+            sql.append("BEGIN\n").append(pgBody).append("\n").append(returnStmt).append("\nEND;\n$$ LANGUAGE plpgsql;\n\n");
+            sql.append("DROP TRIGGER IF EXISTS ").append(name.toLowerCase()).append(" ON ").append(table.toLowerCase()).append(";\n");
+            sql.append("CREATE TRIGGER ").append(name.toLowerCase()).append("\n");
+            sql.append(timing).append(" ").append(String.join(" OR ", events)).append(" ON ").append(table.toLowerCase()).append("\n");
+            sql.append("FOR EACH ").append(level).append(" EXECUTE FUNCTION ").append(funcName).append("();");
+            
+            return sql.toString();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static Set<String> getViewDependencies(Connection conn, String owner, String viewName, DatabaseObjects db) {
+        Set<String> deps = new HashSet<>();
+        try (PreparedStatement ps = conn.prepareStatement(
+            "SELECT text FROM all_views WHERE owner = ? AND view_name = ?")) {
+            ps.setString(1, owner);
+            ps.setString(2, viewName.toUpperCase());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    String text = rs.getString(1).toUpperCase();
+                    for (String view : db.validViews) {
+                        if (!view.equals(viewName) && text.contains(view.toUpperCase())) deps.add("VIEW:" + view);
+                    }
+                }
+            }
+        } catch (Exception ignore) {}
+        return deps;
+    }
+
+    private static boolean executeSQL(PostgreSQL postgres, String sql) {
+        try (Connection conn = PostgresService.PostgresConnexion(postgres);
+             Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate(sql);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private static List<String> topologicalSort(Map<String, Set<String>> deps) {
         List<String> result = new ArrayList<>();
         Set<String> visited = new HashSet<>();
         Set<String> visiting = new HashSet<>();
-        
         for (String item : deps.keySet()) {
-            if (!visited.contains(item)) {
-                dfs(item, deps, visited, visiting, result);
-            }
+            if (!visited.contains(item)) dfs(item, deps, visited, visiting, result);
         }
         return result;
     }
@@ -689,92 +752,12 @@ public class CompleteMigrationService {
             }
             return;
         }
-        
         visiting.add(item);
         for (String dep : deps.getOrDefault(item, Collections.emptySet())) {
             dfs(dep, deps, visited, visiting, result);
         }
         visiting.remove(item);
-        
         if (!result.contains(item)) result.add(item);
         visited.add(item);
-    }
-
-    private static String convertFunctionToPostgres(String oracleSQL) {
-        if (oracleSQL == null || oracleSQL.trim().isEmpty()) {
-            return null;
-        }
-        
-        // Conversion basique Oracle → PostgreSQL
-        return oracleSQL
-            .replaceAll("(?i)\\bNUMBER\\b", "NUMERIC")
-            .replaceAll("(?i)\\bVARCHAR2\\b", "VARCHAR")
-            .replaceAll("(?i)\\bDATE\\b", "TIMESTAMP")
-            .replaceAll("(?i)\\bCLOB\\b", "TEXT")
-            .replaceAll("(?i)\\bBLOB\\b", "BYTEA")
-            .replaceAll("(?i)\\bSYSDATE\\b", "CURRENT_TIMESTAMP")
-            .replaceAll("(?i)\\bNVL\\s*\\(", "COALESCE(")
-            .replaceAll("(?i)\\bTO_CHAR\\s*\\(", "TO_CHAR(")
-            .replaceAll("(?i)\\bTO_NUMBER\\s*\\(", "TO_NUMBER(")
-            .replaceAll("(?i)\\bTO_DATE\\s*\\(", "TO_TIMESTAMP(")
-            .replaceAll("(?i)\\bSUBSTR\\s*\\(", "SUBSTRING(")
-            .replaceAll("(?i)\\bINSTR\\s*\\(", "POSITION(");
-    }
-
-    private static String convertViewToPostgres(String oracleSQL) {
-        return OracleService.enhancedMapOracleViewSQLToPostgres(oracleSQL);
-    }
-
-    private static List<String> getPrimaryKeyConstraints(Connection conn, String table) throws SQLException {
-        List<String> list = new ArrayList<>();
-        String sql = "SELECT cols.column_name FROM user_constraints cons " +
-                    "JOIN user_cons_columns cols ON cons.constraint_name = cols.constraint_name " +
-                    "WHERE cons.table_name = ? AND cons.constraint_type = 'P' ORDER BY cols.position";
-        
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, table.toUpperCase());
-            List<String> columns = new ArrayList<>();
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) columns.add(rs.getString(1).toLowerCase());
-            }
-            if (!columns.isEmpty()) {
-                list.add("ALTER TABLE " + table.toLowerCase() + " ADD PRIMARY KEY (" + String.join(", ", columns) + ");");
-            }
-        }
-        return list;
-    }
-
-    private static List<String> getIndexes(Connection conn, String table) throws SQLException {
-        List<String> list = new ArrayList<>();
-        String sql = "SELECT idx.index_name, idx.uniqueness, cols.column_name " +
-                    "FROM user_indexes idx " +
-                    "JOIN user_ind_columns cols ON idx.index_name = cols.index_name " +
-                    "WHERE idx.table_name = ? AND idx.index_name NOT IN " +
-                    "(SELECT constraint_name FROM user_constraints WHERE table_name = ? AND constraint_type IN ('P', 'U')) " +
-                    "ORDER BY idx.index_name, cols.column_position";
-        
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, table.toUpperCase());
-            ps.setString(2, table.toUpperCase());
-            Map<String, List<String>> indexes = new HashMap<>();
-            Map<String, Boolean> unique = new HashMap<>();
-            
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    String name = rs.getString(1);
-                    unique.put(name, "UNIQUE".equals(rs.getString(2)));
-                    String col = rs.getString(3).toLowerCase();
-                    indexes.computeIfAbsent(name, k -> new ArrayList<>()).add(col);
-                }
-            }
-            
-            for (Map.Entry<String, List<String>> entry : indexes.entrySet()) {
-                String idxName = entry.getKey().toLowerCase();
-                List<String> cols = entry.getValue();
-                String uniqueStr = unique.get(entry.getKey()) ? "UNIQUE " : "";
-                list.add("CREATE " + uniqueStr + "INDEX " + idxName + " ON " + table.toLowerCase() + " (" + String.join(", ", cols) + ");");
-            }
-        }
-        return list;
     }
 }
