@@ -13,6 +13,7 @@ import stage.bici.DBBridge.Model.PostgreSQL;
 import stage.bici.DBBridge.Service.CompleteMigrationService;
 import stage.bici.DBBridge.Service.CompletePostgresToOracleMigration;
 import stage.bici.DBBridge.Service.OracleService;
+import stage.bici.DBBridge.Service.PostgresService;
 
 
 @Controller
@@ -113,7 +114,19 @@ public class OracleController {
         Oracle oracle = session.getAttribute("dbOracle") != null ? (Oracle) session.getAttribute("dbOracle") : null;
         PostgreSQL postgreSQL = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
         try {
-            CompleteMigrationService.migrateCompleteDatabase(oracle, postgreSQL);
+            OracleService.migrateCompleteDatabase(oracle, postgreSQL);
+        } catch (Exception e) {
+            e.printStackTrace();    
+        }
+        return "pages/Accueil";
+    }
+
+    @GetMapping("/testAllPostgres")
+    public String insertall(HttpSession session) {
+        Oracle oracle = session.getAttribute("dbOracle") != null ? (Oracle) session.getAttribute("dbOracle") : null;
+        PostgreSQL postgreSQL = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
+        try {
+            PostgresService.migrateCompleteDatabase(postgreSQL,oracle);
         } catch (Exception e) {
             e.printStackTrace();    
         }

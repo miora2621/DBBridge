@@ -160,12 +160,14 @@ public class CompleteMigrationService {
                         String name = rs.getString(1);
                         allViews.add(name);
                         if ("VALID".equalsIgnoreCase(rs.getString(2))) db.validViews.add(name);
-                        else db.invalidViews.add(name);
+                        else db.invalidViews.add(rs.getString(1));
                     }
                 }
             }
+            
+            // Analyser les dépendances COMPLÈTES (tables, vues, fonctions)
             for (String v : allViews) {
-                db.viewDependencies.put(v, getViewDependencies(conn, db.owner, v, db));
+                db.viewDependencies.put(v, getViewDependenciesComplete(conn, db.owner, v, db));
             }
 
             try (PreparedStatement ps = conn.prepareStatement(
@@ -237,7 +239,6 @@ public class CompleteMigrationService {
         }
     }
 
-    // ========== SÉQUENCES: FIX DÉBORDEMENT NUMÉRIQUE ==========
     private static void migrateSequencesComplete(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) throws SQLException {
         stats.sequencesValid = db.validSequences.size();
         stats.sequencesInvalid = db.invalidSequences.size();
@@ -252,7 +253,6 @@ public class CompleteMigrationService {
                         ps.setString(2, seqName.toUpperCase());
                         try (ResultSet rs = ps.executeQuery()) {
                             if (rs.next()) {
-                                // Utiliser BigDecimal pour éviter débordement
                                 BigDecimal minValue = rs.getBigDecimal("min_value");
                                 BigDecimal maxValue = rs.getBigDecimal("max_value");
                                 long increment = rs.getLong("increment_by");
@@ -264,14 +264,12 @@ public class CompleteMigrationService {
                                 sql.append(seqName.toLowerCase());
                                 sql.append(" INCREMENT BY ").append(increment);
                                 
-                                // Gérer les débordements: utiliser START WITH 1 si last_number dépasse BIGINT
                                 if (startValue.compareTo(BigDecimal.valueOf(Long.MAX_VALUE)) > 0) {
                                     sql.append(" START WITH 1");
                                 } else {
                                     sql.append(" START WITH ").append(startValue.longValue());
                                 }
                                 
-                                // Gérer MINVALUE
                                 BigDecimal pgMinValue = BigDecimal.valueOf(-9223372036854775807L);
                                 if (minValue.compareTo(pgMinValue) <= 0) {
                                     sql.append(" NO MINVALUE");
@@ -279,7 +277,6 @@ public class CompleteMigrationService {
                                     sql.append(" MINVALUE ").append(minValue.longValue());
                                 }
                                 
-                                // Gérer MAXVALUE
                                 BigDecimal pgMaxValue = BigDecimal.valueOf(9223372036854775807L);
                                 if (maxValue.compareTo(pgMaxValue) >= 0) {
                                     sql.append(" NO MAXVALUE");
@@ -304,7 +301,6 @@ public class CompleteMigrationService {
         }
     }
 
-    // ========== FONCTIONS: FIX PARSING COMPLET ==========
     private static void migrateFunctionsComplete(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) {
         stats.functionsValid = db.validFunctions.size();
         stats.functionsInvalid = db.invalidFunctions.size();
@@ -312,9 +308,8 @@ public class CompleteMigrationService {
         try (Connection oraConn = OracleService.OracleConnexion(oracle)) {
             for (String funcName : db.validFunctions) {
                 try {
-                    // Toutes les fonctions GETSEQ* sont des wrappers de séquence
                     if (funcName.toUpperCase().startsWith("GETSEQ")) {
-                        String seqName = funcName.substring(6); // Enlever "GETSEQ"
+                        String seqName = funcName.substring(6);
                         String pgSQL = "CREATE OR REPLACE FUNCTION " + funcName.toLowerCase() + 
                                       "() RETURNS BIGINT AS $$\n" +
                                       "BEGIN\n" +
@@ -329,7 +324,6 @@ public class CompleteMigrationService {
                         }
                     }
                     
-                    // Pour les autres fonctions, extraire le code source
                     StringBuilder source = new StringBuilder();
                     try (PreparedStatement ps = oraConn.prepareStatement(
                         "SELECT text FROM all_source WHERE owner = ? AND name = ? AND type = 'FUNCTION' ORDER BY line")) {
@@ -360,7 +354,6 @@ public class CompleteMigrationService {
         try {
             String src = oracleSource.replaceAll("\\s+", " ").trim();
             
-            // Pattern: FUNCTION name (params) RETURN type IS/AS ... BEGIN ... END
             Pattern p1 = Pattern.compile(
                 "(?i)FUNCTION\\s+" + Pattern.quote(name) + "\\s*\\(([^)]*)\\)\\s*RETURN\\s+([\\w\\(\\),\\s]+?)\\s+(?:IS|AS)\\s+(.*?)\\s*BEGIN\\s+(.*?)\\s*END",
                 Pattern.DOTALL
@@ -375,7 +368,6 @@ public class CompleteMigrationService {
                 return buildPostgresFunction(name, params, returnType, declarations, body);
             }
             
-            // Pattern sans paramètres
             Pattern p2 = Pattern.compile(
                 "(?i)FUNCTION\\s+" + Pattern.quote(name) + "\\s*RETURN\\s+([\\w\\(\\),\\s]+?)\\s+(?:IS|AS)\\s+(.*?)\\s*BEGIN\\s+(.*?)\\s*END",
                 Pattern.DOTALL
@@ -463,67 +455,164 @@ public class CompleteMigrationService {
         return type;
     }
 
-    // ========== VUES: FIX COLONNES DUPLIQUÉES + RELATIONS MANQUANTES ==========
+    // ========== VUES: MIGRATION STRICTE (avec toutes dépendances) ==========
     private static void migrateViewsComplete(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) {
         stats.viewsValid = db.validViews.size();
         stats.viewsInvalid = db.invalidViews.size();
         
-        List<String> orderedViews = sortViewsByDependencies(db);
+        System.out.println("📊 Vues valides totales: " + stats.viewsValid);
+        System.out.println("📊 Analyse des dépendances...");
         
+        // Filtrer les vues dont TOUTES les dépendances sont satisfaites
+        Set<String> migrableViews = filterViewsWithSatisfiedDependencies(db);
+        System.out.println("📊 Vues migrables (dépendances OK): " + migrableViews.size());
+        System.out.println("⚠️  Vues non migrables (dépendances manquantes): " + (stats.viewsValid - migrableViews.size()));
+        
+        // Trier par ordre de dépendances
+        List<String> orderedViews = sortViewsByDependencies(db, migrableViews);
+        
+        // Migrer avec retry multi-passes
         try (Connection oraConn = OracleService.OracleConnexion(oracle)) {
-            for (String viewName : orderedViews) {
-                try {
-                    String viewDef = null;
-                    try (PreparedStatement ps = oraConn.prepareStatement(
-                        "SELECT text FROM all_views WHERE owner = ? AND view_name = ?")) {
-                        ps.setString(1, db.owner);
-                        ps.setString(2, viewName.toUpperCase());
-                        try (ResultSet rs = ps.executeQuery()) {
-                            if (rs.next()) viewDef = rs.getString(1);
+            Set<String> migrated = new HashSet<>();
+            int maxPasses = 3;
+            
+            for (int pass = 1; pass <= maxPasses; pass++) {
+                System.out.println("\n🔄 Passe " + pass + "/" + maxPasses + "...");
+                int successThisPass = 0;
+                
+                for (String viewName : orderedViews) {
+                    if (migrated.contains(viewName)) continue;
+                    
+                    try {
+                        String viewDef = null;
+                        try (PreparedStatement ps = oraConn.prepareStatement(
+                            "SELECT text FROM all_views WHERE owner = ? AND view_name = ?")) {
+                            ps.setString(1, db.owner);
+                            ps.setString(2, viewName.toUpperCase());
+                            try (ResultSet rs = ps.executeQuery()) {
+                                if (rs.next()) viewDef = rs.getString(1);
+                            }
                         }
+                        
+                        if (viewDef == null || viewDef.trim().isEmpty()) continue;
+                        
+                        String pgView = convertViewToPostgresAdvanced(viewName, viewDef);
+                        if (pgView != null && executeSQLSilent(postgres, pgView)) {
+                            migrated.add(viewName);
+                            stats.viewsMigrated++;
+                            successThisPass++;
+                            System.out.println("✅ Vue: " + viewName);
+                        }
+                    } catch (Exception e) {
+                        // Retry au prochain pass
                     }
-                    
-                    if (viewDef == null || viewDef.trim().isEmpty()) continue;
-                    
-                    String pgView = convertViewToPostgres(viewName, viewDef);
-                    if (pgView != null && executeSQL(postgres, pgView)) {
-                        stats.viewsMigrated++;
-                        System.out.println("✅ Vue: " + viewName);
-                    }
-                } catch (Exception e) {
-                    System.err.println("❌ Vue " + viewName + ": " + e.getMessage());
                 }
+                
+                System.out.println("📊 Succès passe " + pass + ": " + successThisPass + " vues");
+                
+                if (successThisPass == 0) break; // Plus de progrès possible
             }
+            
+            System.out.println("\n📊 RÉSULTAT FINAL VUES:");
+            System.out.println("  ✅ Migrées avec succès: " + stats.viewsMigrated);
+            System.out.println("  ⚠️  Non migrables (dépendances): " + (stats.viewsValid - migrableViews.size()));
+            System.out.println("  ❌ Échec conversion SQL: " + (migrableViews.size() - stats.viewsMigrated));
+            
         } catch (Exception e) {
             System.err.println("❌ Erreur globale vues: " + e.getMessage());
         }
     }
 
-    private static String convertViewToPostgres(String name, String oracleSQL) {
+    // Filtrer les vues dont TOUTES les dépendances sont présentes
+    private static Set<String> filterViewsWithSatisfiedDependencies(DatabaseObjects db) {
+        Set<String> result = new HashSet<>();
+        
+        for (String view : db.validViews) {
+            Set<String> deps = db.viewDependencies.get(view);
+            if (deps == null || deps.isEmpty()) {
+                result.add(view);
+                continue;
+            }
+            
+            boolean allDepsOk = true;
+            for (String dep : deps) {
+                if (dep.startsWith("TABLE:")) {
+                    String table = dep.substring(6);
+                    if (!db.validTables.contains(table)) {
+                        allDepsOk = false;
+                        break;
+                    }
+                } else if (dep.startsWith("VIEW:")) {
+                    String depView = dep.substring(5);
+                    if (!db.validViews.contains(depView)) {
+                        allDepsOk = false;
+                        break;
+                    }
+                } else if (dep.startsWith("FUNCTION:")) {
+                    String func = dep.substring(9);
+                    if (!db.validFunctions.contains(func)) {
+                        allDepsOk = false;
+                        break;
+                    }
+                }
+            }
+            
+            if (allDepsOk) {
+                result.add(view);
+            }
+        }
+        
+        return result;
+    }
+
+    // Conversion SQL Oracle → PostgreSQL avancée
+    private static String convertViewToPostgresAdvanced(String name, String oracleSQL) {
         try {
             String pgSQL = oracleSQL
-                // Outer joins Oracle (+)
+                // Outer joins (+)
                 .replaceAll("\\(\\+\\)", "")
                 // Types
                 .replaceAll("(?i)\\bNUMBER\\b", "NUMERIC")
                 .replaceAll("(?i)\\bVARCHAR2\\b", "VARCHAR")
-                // Fonctions Oracle → PostgreSQL
+                .replaceAll("(?i)\\bNVARCHAR2\\b", "VARCHAR")
+                .replaceAll("(?i)\\bCLOB\\b", "TEXT")
+                // Fonctions date
                 .replaceAll("(?i)\\bSYSDATE\\b", "CURRENT_TIMESTAMP")
+                .replaceAll("(?i)\\bSYSTIMESTAMP\\b", "CURRENT_TIMESTAMP")
+                .replaceAll("(?i)\\bTRUNC\\s*\\(\\s*([^,)]+)\\s*\\)", "DATE_TRUNC('day', $1)")
+                .replaceAll("(?i)\\bTRUNC\\s*\\(\\s*([^,)]+)\\s*,\\s*'(\\w+)'\\s*\\)", "DATE_TRUNC('$2', $1)")
+                .replaceAll("(?i)\\bADD_MONTHS\\s*\\(\\s*([^,)]+)\\s*,\\s*(\\d+)\\s*\\)", "($1 + INTERVAL '$2 months')")
+                .replaceAll("(?i)\\bMONTHS_BETWEEN\\s*\\(\\s*([^,)]+)\\s*,\\s*([^)]+)\\s*\\)", 
+                           "(EXTRACT(YEAR FROM AGE($1, $2)) * 12 + EXTRACT(MONTH FROM AGE($1, $2)))")
+                .replaceAll("(?i)\\bLAST_DAY\\s*\\(\\s*([^)]+)\\s*\\)", 
+                           "(DATE_TRUNC('month', $1) + INTERVAL '1 month' - INTERVAL '1 day')")
+                // Fonctions string
                 .replaceAll("(?i)\\bNVL\\s*\\(", "COALESCE(")
+                .replaceAll("(?i)\\bNVL2\\s*\\(\\s*([^,)]+)\\s*,\\s*([^,)]+)\\s*,\\s*([^)]+)\\s*\\)", 
+                           "CASE WHEN $1 IS NOT NULL THEN $2 ELSE $3 END")
                 .replaceAll("(?i)\\bSUBSTR\\s*\\(", "SUBSTRING(")
-                .replaceAll("(?i)\\bTO_DATE\\s*\\(", "TO_TIMESTAMP(")
+                .replaceAll("(?i)\\bINSTR\\s*\\(\\s*([^,)]+)\\s*,\\s*([^)]+)\\s*\\)", "POSITION($2 IN $1)")
+                .replaceAll("(?i)\\bCONCAT\\s*\\(\\s*([^,)]+)\\s*,\\s*([^)]+)\\s*\\)", "($1 || $2)")
+                .replaceAll("(?i)\\bINITCAP\\s*\\(", "INITCAP(")
+                // Conversions
                 .replaceAll("(?i)\\bTO_CHAR\\s*\\(", "TO_CHAR(")
-                // TRUNC(date) → DATE_TRUNC('day', date)
-                .replaceAll("(?i)\\bTRUNC\\s*\\(\\s*([^)]+)\\s*\\)", "DATE_TRUNC('day', $1)")
-                // LISTAGG → STRING_AGG
-                .replaceAll("(?i)\\bLISTAGG\\s*\\(", "STRING_AGG(")
-                // TO_TIMESTAMP avec 1 arg numérique → TO_TIMESTAMP avec CAST
-                .replaceAll("(?i)TO_TIMESTAMP\\s*\\(\\s*(\\w+)\\s*,", "TO_TIMESTAMP(CAST($1 AS TEXT),")
-                // ROWNUM → ROW_NUMBER()
+                .replaceAll("(?i)\\bTO_NUMBER\\s*\\(([^,)]+)\\)", "CAST($1 AS NUMERIC)")
+                .replaceAll("(?i)\\bTO_DATE\\s*\\(", "TO_TIMESTAMP(")
+                .replaceAll("(?i)\\bTO_TIMESTAMP\\s*\\(", "TO_TIMESTAMP(")
+                // Agrégations
+                .replaceAll("(?i)\\bLISTAGG\\s*\\(\\s*([^,)]+)\\s*,\\s*([^)]+)\\s*\\)", "STRING_AGG($1, $2)")
+                .replaceAll("(?i)\\bWM_CONCAT\\s*\\(", "STRING_AGG(")
+                // ROWNUM
                 .replaceAll("(?i)\\bROWNUM\\b", "ROW_NUMBER() OVER ()")
-                // Dual
+                // DUAL
                 .replaceAll("(?i)\\bFROM\\s+DUAL\\b", "")
-                // Noms en minuscules
+                .replaceAll("(?i)\\bFROM\\s+SYS\\.DUAL\\b", "")
+                // Séquences
+                .replaceAll("(?i)(\\w+)\\.NEXTVAL", "nextval('$1')")
+                .replaceAll("(?i)(\\w+)\\.CURRVAL", "currval('$1')")
+                // Guillemets
+                .replaceAll("\"([^\"]+)\"", "$1")
+                // Minuscules
                 .toLowerCase();
             
             return "CREATE OR REPLACE VIEW " + name.toLowerCase() + " AS " + pgSQL;
@@ -532,22 +621,53 @@ public class CompleteMigrationService {
         }
     }
 
-    private static List<String> sortViewsByDependencies(DatabaseObjects db) {
+    private static List<String> sortViewsByDependencies(DatabaseObjects db, Set<String> viewsToSort) {
         Map<String, Set<String>> deps = new HashMap<>();
-        for (String view : db.validViews) {
+        for (String view : viewsToSort) {
             Set<String> viewDeps = new HashSet<>();
             Set<String> allDeps = db.viewDependencies.get(view);
             if (allDeps != null) {
                 for (String dep : allDeps) {
                     if (dep.startsWith("VIEW:")) {
                         String depView = dep.substring(5);
-                        if (db.validViews.contains(depView)) viewDeps.add(depView);
+                        if (viewsToSort.contains(depView)) viewDeps.add(depView);
                     }
                 }
             }
             deps.put(view, viewDeps);
         }
         return topologicalSort(deps);
+    }
+
+    // Récupérer dépendances COMPLÈTES (tables, vues, fonctions)
+    private static Set<String> getViewDependenciesComplete(Connection conn, String owner, String viewName, DatabaseObjects db) {
+        Set<String> deps = new HashSet<>();
+        try (PreparedStatement ps = conn.prepareStatement(
+            "SELECT text FROM all_views WHERE owner = ? AND view_name = ?")) {
+            ps.setString(1, owner);
+            ps.setString(2, viewName.toUpperCase());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    String text = rs.getString(1).toUpperCase();
+                    
+                    // Tables
+                    for (String table : db.validTables) {
+                        if (text.contains(table.toUpperCase())) deps.add("TABLE:" + table);
+                    }
+                    
+                    // Vues
+                    for (String view : db.validViews) {
+                        if (!view.equals(viewName) && text.contains(view.toUpperCase())) deps.add("VIEW:" + view);
+                    }
+                    
+                    // Fonctions
+                    for (String func : db.validFunctions) {
+                        if (text.contains(func.toUpperCase() + "(")) deps.add("FUNCTION:" + func);
+                    }
+                }
+            }
+        } catch (Exception ignore) {}
+        return deps;
     }
 
     private static void migrateConstraints(Oracle oracle, PostgreSQL postgres, DatabaseObjects db, MigrationStats stats) throws SQLException {
@@ -705,25 +825,17 @@ public class CompleteMigrationService {
         }
     }
 
-    private static Set<String> getViewDependencies(Connection conn, String owner, String viewName, DatabaseObjects db) {
-        Set<String> deps = new HashSet<>();
-        try (PreparedStatement ps = conn.prepareStatement(
-            "SELECT text FROM all_views WHERE owner = ? AND view_name = ?")) {
-            ps.setString(1, owner);
-            ps.setString(2, viewName.toUpperCase());
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    String text = rs.getString(1).toUpperCase();
-                    for (String view : db.validViews) {
-                        if (!view.equals(viewName) && text.contains(view.toUpperCase())) deps.add("VIEW:" + view);
-                    }
-                }
-            }
-        } catch (Exception ignore) {}
-        return deps;
+    private static boolean executeSQL(PostgreSQL postgres, String sql) {
+        try (Connection conn = PostgresService.PostgresConnexion(postgres);
+             Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate(sql);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
-    private static boolean executeSQL(PostgreSQL postgres, String sql) {
+    private static boolean executeSQLSilent(PostgreSQL postgres, String sql) {
         try (Connection conn = PostgresService.PostgresConnexion(postgres);
              Statement stmt = conn.createStatement()) {
             stmt.executeUpdate(sql);
