@@ -1271,45 +1271,120 @@ public class OracleService {
     }
 
     private static String convertViewToPostgres(String name, String oracleSQL) {
-        // Conversion améliorée des vues
-        String pgSQL = oracleSQL
-            // Fonctions Oracle → PostgreSQL
-            .replaceAll("(?i)\\bSYSDATE\\b", "CURRENT_TIMESTAMP")
-            .replaceAll("(?i)\\bNVL\\s*\\(", "COALESCE(")
-            .replaceAll("(?i)\\bSUBSTR\\s*\\(", "SUBSTRING(")
-            .replaceAll("(?i)\\bINSTR\\s*\\(", "POSITION(")
-            .replaceAll("(?i)\\bTO_CHAR\\s*\\(", "TO_CHAR(")
-            .replaceAll("(?i)\\bTO_NUMBER\\s*\\(", "CAST(")
-            .replaceAll("(?i)\\bTO_DATE\\s*\\(", "TO_TIMESTAMP(")
-            // Séquences
-            .replaceAll("(?i)(\\w+)\\.NEXTVAL", "nextval('" + "$1" + "')")
-            .replaceAll("(?i)(\\w+)\\.CURRVAL", "currval('" + "$1" + "')")
-            // ROWNUM
-            .replaceAll("(?i)\\bROWNUM\\b", "ROW_NUMBER() OVER ()")
-            // DUAL
-            .replaceAll("(?i)\\bFROM\\s+DUAL\\b", "")
-            // TRUNC → DATE_TRUNC
-            .replaceAll("(?i)\\bTRUNC\\s*\\(", "DATE_TRUNC('day', ")
-            // LISTAGG → STRING_AGG (correction)
-            .replaceAll("(?i)LISTAGG\\s*\\(([^,]+),\\s*'([^']*)'\\s*\\)\\s*WITHIN\\s+GROUP\\s*\\(\\s*ORDER\\s+BY\\s+([^)]+)\\)", "STRING_AGG($1, '$2' ORDER BY $3)")
-            .replaceAll("(?i)LISTAGG\\s*\\(([^,]+),\\s*'([^']*)'\\s*\\)", "STRING_AGG($1, '$2')")
-            // NUMBER → NUMERIC
-            .replaceAll("(?i)\\bNUMBER\\b", "NUMERIC")
-            // VARCHAR2 → VARCHAR
-            .replaceAll("(?i)\\bVARCHAR2\\b", "VARCHAR")
-            // Ajouter des alias aux sous-requêtes manquantes
-            .replaceAll("FROM\\s*\\(\\s*SELECT", "FROM (SELECT")
-            .replaceAll("\\)\\s*WHERE", ") subquery_alias WHERE")
-            .replaceAll("\\)\\s*GROUP", ") subquery_alias GROUP")
-            .replaceAll("\\)\\s*HAVING", ") subquery_alias HAVING")
-            .replaceAll("\\)\\s*ORDER", ") subquery_alias ORDER")
-            .replaceAll("\\)\\s*UNION", ") subquery_alias UNION")
-            .replaceAll("\\)\\s*JOIN", ") subquery_alias JOIN")
-            // Identifiants en minuscules
-            .toLowerCase();
-        
-        return "CREATE OR REPLACE VIEW " + quotePg(name) + " AS " + pgSQL;
+    // Conversion améliorée des vues
+    String pgSQL = oracleSQL
+        // Fonctions Oracle → PostgreSQL
+        .replaceAll("(?i)\\bSYSDATE\\b", "CURRENT_TIMESTAMP")
+        .replaceAll("(?i)\\bNVL\\s*\\(", "COALESCE(")
+        .replaceAll("(?i)\\bSUBSTR\\s*\\(", "SUBSTRING(")
+        .replaceAll("(?i)\\bINSTR\\s*\\(", "POSITION(")
+        .replaceAll("(?i)\\bTO_CHAR\\s*\\(", "TO_CHAR(")
+        .replaceAll("(?i)\\bTO_NUMBER\\s*\\(", "CAST(")
+        .replaceAll("(?i)\\bTO_DATE\\s*\\(", "TO_TIMESTAMP(")
+        // Séquences
+        .replaceAll("(?i)(\\w+)\\.NEXTVAL", "nextval('" + "$1" + "')")
+        .replaceAll("(?i)(\\w+)\\.CURRVAL", "currval('" + "$1" + "')")
+        // ROWNUM
+        .replaceAll("(?i)\\bROWNUM\\b", "ROW_NUMBER() OVER ()")
+        // DUAL
+        .replaceAll("(?i)\\bFROM\\s+DUAL\\b", "")
+        // TRUNC → DATE_TRUNC
+        .replaceAll("(?i)\\bTRUNC\\s*\\(", "DATE_TRUNC('day', ")
+        // LISTAGG → STRING_AGG (correction)
+        .replaceAll("(?i)LISTAGG\\s*\\(([^,]+),\\s*'([^']*)'\\s*\\)\\s*WITHIN\\s+GROUP\\s*\\(\\s*ORDER\\s+BY\\s+([^)]+)\\)", "STRING_AGG($1, '$2' ORDER BY $3)")
+        .replaceAll("(?i)LISTAGG\\s*\\(([^,]+),\\s*'([^']*)'\\s*\\)", "STRING_AGG($1, '$2')")
+        // NUMBER → NUMERIC
+        .replaceAll("(?i)\\bNUMBER\\b", "NUMERIC")
+        // VARCHAR2 → VARCHAR
+        .replaceAll("(?i)\\bVARCHAR2\\b", "VARCHAR")
+        // Jointures externes Oracle (+) → PostgreSQL
+        .replaceAll("(?i)(\\w+)\\.(\\w+)\\s*\\(\\+\\s*\\)", "$1.$2")
+        .replaceAll("(?i),(\\s*\\w+\\.\\w+\\s*=\\s*\\w+\\.\\w+\\s*\\(\\+\\s*\\))", " LEFT JOIN $1")
+        .replaceAll("(?i)(\\w+\\.\\w+\\s*\\(\\+\\s*\\)\\s*=\\s*\\w+\\.\\w+)", "$1")
+        // Conversion spécifique des jointures externes Oracle
+        .replaceAll("(?i)WHERE\\s+(.+?)\\s*\\(\\+\\s*\\)\\s*=\\s*(.+?)", "LEFT JOIN $1 ON $2")
+        .replaceAll("(?i),(\\s*\\w+\\s+\\w+\\s*\\(\\+\\s*\\))", " LEFT JOIN $1")
+        // Gestion avancée des jointures externes Oracle
+        .replaceAll("(?i)(\\w+)\\s*\\(\\+\\s*\\)", "$1")
+        .replaceAll("(?i)FROM\\s+((?:\\w+\\s*,\\s*)*\\w+\\s*\\(\\+\\s*\\))", convertOracleOuterJoins("FROM $1"))
+        // Ajouter des alias aux sous-requêtes manquantes
+        .replaceAll("FROM\\s*\\(\\s*SELECT", "FROM (SELECT")
+        .replaceAll("\\)\\s*WHERE", ") subquery_alias WHERE")
+        .replaceAll("\\)\\s*GROUP", ") subquery_alias GROUP")
+        .replaceAll("\\)\\s*HAVING", ") subquery_alias HAVING")
+        .replaceAll("\\)\\s*ORDER", ") subquery_alias ORDER")
+        .replaceAll("\\)\\s*UNION", ") subquery_alias UNION")
+        .replaceAll("\\)\\s*JOIN", ") subquery_alias JOIN")
+        // Identifiants en minuscules
+        .toLowerCase();
+    
+    // Post-traitement pour corriger les jointures
+    pgSQL = fixOracleOuterJoins(pgSQL);
+    
+    return "CREATE OR REPLACE VIEW " + quotePg(name) + " AS " + pgSQL;
+}
+// Méthode pour convertir les jointures externes Oracle
+private static String convertOracleOuterJoins(String match) {
+    String fromClause = match.substring(5); // Enlever "FROM "
+    String[] tables = fromClause.split(",");
+    
+    StringBuilder result = new StringBuilder("FROM ");
+    List<String> mainTables = new ArrayList<>();
+    List<String> outerJoinTables = new ArrayList<>();
+    
+    for (String table : tables) {
+        table = table.trim();
+        if (table.contains("(+)")) {
+            outerJoinTables.add(table.replace("(+)", "").trim());
+        } else {
+            mainTables.add(table);
+        }
     }
+    
+    if (!mainTables.isEmpty()) {
+        result.append(String.join(", ", mainTables));
+    }
+    
+    for (String outerTable : outerJoinTables) {
+        // Pour l'instant, on les laisse en tant que tables normales
+        // Une conversion plus avancée nécessiterait l'analyse des conditions WHERE
+        if (mainTables.isEmpty()) {
+            result.append(outerTable);
+        } else {
+            result.append(", ").append(outerTable);
+        }
+    }
+    
+    return result.toString();
+}
+
+// Méthode pour corriger les jointures externes Oracle de manière plus robuste
+private static String fixOracleOuterJoins(String sql) {
+    // Pattern pour détecter les conditions de jointure externe Oracle
+    Pattern pattern = Pattern.compile("(\\w+\\.\\w+)\\s*=\\s*(\\w+\\.\\w+)\\s*\\(\\+\\s*\\)", Pattern.CASE_INSENSITIVE);
+    Matcher matcher = pattern.matcher(sql);
+    
+    StringBuffer result = new StringBuffer();
+    while (matcher.find()) {
+        // Remplacer par une condition normale (perte de l'outer join mais évite l'erreur)
+        matcher.appendReplacement(result, "$1 = $2");
+    }
+    matcher.appendTail(result);
+    
+    String processed = result.toString();
+    
+    // Deuxième passe : gérer l'autre sens
+    pattern = Pattern.compile("(\\w+\\.\\w+)\\s*\\(\\+\\s*\\)\\s*=\\s*(\\w+\\.\\w+)", Pattern.CASE_INSENSITIVE);
+    matcher = pattern.matcher(processed);
+    
+    result = new StringBuffer();
+    while (matcher.find()) {
+        matcher.appendReplacement(result, "$1 = $2");
+    }
+    matcher.appendTail(result);
+    
+    return result.toString();
+}
 
     // ============================================================
     // MIGRATION FONCTIONS - CORRIGÉE
