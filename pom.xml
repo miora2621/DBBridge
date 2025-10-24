@@ -109,6 +109,14 @@
 			<artifactId>ojdbc11</artifactId>
 			<version>23.2.0.0</version> <!-- version stable récente -->
 		</dependency>
+		<dependency>
+			<groupId>com.squareup.okhttp3</groupId>
+			<artifactId>okhttp</artifactId>
+			<version>4.12.0</version>
+		</dependency>
+
+
+
 	</dependencies>
 
 	<build>

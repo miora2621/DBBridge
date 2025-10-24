@@ -1,0 +1,55 @@
+CANDIDAT_COMPLET_CPL -> ERREUR: référence invalide d'une entrée de la clause FROM pour la table « c »
+  Indice : Il existe une entrée pour la table « c » mais elle ne peut pas être
+référencée de cette partie de la requête.
+  Position : 1101
+NOTEOPTIONNELS6 -> ERREUR: erreur de syntaxe sur ou près de « FROM »
+  Position : 579
+ETATCAISSEDEVISE -> ERREUR: erreur de syntaxe sur ou près de « FROM »
+  Position : 345
+ETATRECETTE -> ERREUR: erreur de syntaxe sur ou près de « ) »
+  Position : 323
+LIGNECREDITRECETTE -> Définition de vue vide
+ENTREEUNIVLIB2 -> ERREUR: la colonne « id » est spécifiée plus d'une fois
+ETUDIANTPROMOINACTIF -> ERREUR: la colonne « nom » est spécifiée plus d'une fois
+FACTURESCOL -> Définition de vue vide
+ENTREEUNIVLIB -> ERREUR: la colonne « id » est spécifiée plus d'une fois
+SEMESTRE -> Définition de vue vide
+MATIERE -> Définition de vue vide
+SEMESTREACTUELETU_2025 -> ERREUR: entrée manquante de la clause FROM pour la table « a »
+  Position : 59
+ETUDIANTLIB -> ERREUR: la colonne « nom » est spécifiée plus d'une fois
+NOTE -> Définition de vue vide
+RECETTE -> Définition de vue vide
+TAHINA_NOTEFINALECOMPLETLIB -> ERREUR: erreur de syntaxe sur ou près de « ; »
+  Position : 1105
+ETUDIANT -> Définition de vue vide
+ETUDIANTINACTIF -> Définition de vue vide
+RESERVATIONDETAILSMAXDATE -> ERREUR: la sous-requête du FROM doit avoir un alias
+  Indice : Par exemple, FROM (SELECT...) [AS] quelquechose.
+  Position : 157
+LIGNECREDITCOMPLETCOMPTE_MAT -> Définition de vue vide
+PAYEMENT -> Définition de vue vide
+MATIERELIB -> ERREUR: la colonne « val » est spécifiée plus d'une fois
+ALL_RECETTE -> ERREUR: la sous-requête du FROM doit avoir un alias
+  Indice : Par exemple, FROM (SELECT...) [AS] quelquechose.
+  Position : 119
+PROMOTION -> Définition de vue vide
+JOURSEMAINE -> Définition de vue vide
+PAYEMENTCOMPLETLIB -> ERREUR: erreur de syntaxe sur ou près de « , »
+  Position : 181
+AVANCEMENTSIMPLEID -> ERREUR: la colonne « id » est spécifiée plus d'une fois
+POINTAGEPROFINFO -> ERREUR: erreur de syntaxe sur ou près de « ( »
+  Position : 112
+PAYEMENTCOMPLET -> ERREUR: la colonne « val » est spécifiée plus d'une fois
+ETATDEPENSE -> ERREUR: erreur de syntaxe sur ou près de « ) »
+  Position : 325
+SESSIONEXAMEN -> Définition de vue vide
+ETUDIANTBULLETIN -> ERREUR: erreur de syntaxe sur ou près de « ; »
+  Position : 259
+AVANCEMENT -> Définition de vue vide
+HISTORIQUE -> Définition de vue vide
+TARIFAPAYER -> Définition de vue vide
+UTILISATEUR -> Définition de vue vide
+TYPEAPAYER -> Définition de vue vide
+TAHINAENTREEUNIVLIB -> ERREUR: la colonne « id » est spécifiée plus d'une fois
+NOTEDEFINITIVE -> ERREUR: la colonne « remarque » est spécifiée plus d'une fois
