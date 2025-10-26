@@ -9,253 +9,6 @@ import stage.bici.DBBridge.Model.Oracle;
 import stage.bici.DBBridge.Model.PostgreSQL;
 
 public class OracleService {
-    // ============================================================
-    // STATISTIQUES DE MIGRATION
-    // ============================================================
-    
-    private static class MigrationStats {
-        int tablesTotal, tablesSuccess, tablesFailed;
-        int dataTotal, dataSuccess, dataFailed;
-        int sequencesTotal, sequencesSuccess, sequencesFailed;
-        int indexTotal, indexSuccess, indexFailed;
-        int fkTotal, fkSuccess, fkFailed;
-        int uniqueTotal, uniqueSuccess, uniqueFailed;
-        int checkTotal, checkSuccess, checkFailed;
-        int pkTotal, pkSuccess;
-        int viewsTotal, viewsSuccess, viewsFailed;
-        int functionsTotal, functionsSuccess, functionsFailed;
-        int triggersTotal, triggersSuccess, triggersFailed;
-        
-        List<String> failedTables = new ArrayList<>();
-        List<String> failedData = new ArrayList<>();
-        Map<String, String> failedSequences = new HashMap<>();
-        Map<String, String> failedIndexes = new HashMap<>();
-        Map<String, String> failedFKs = new HashMap<>();
-        Map<String, String> failedUniques = new HashMap<>();
-        Map<String, String> failedChecks = new HashMap<>();
-        Map<String, String> failedViews = new HashMap<>();
-        Map<String, String> failedFunctions = new HashMap<>();
-        Map<String, String> failedTriggers = new HashMap<>();
-        
-        // Résumé des logs par type d'erreur
-        Map<String, Integer> errorsSummary = new LinkedHashMap<>();
-        Map<String, List<String>> errorsExamples = new LinkedHashMap<>();
-        
-        List<String> warnings = new ArrayList<>();
-        int dataRowsFailed = 0;
-        int nullBytesRemoved = 0;
-        
-        // Stockage temporaire des erreurs
-        List<String> allErrors = new ArrayList<>();
-
-        void addError(String error) {
-            allErrors.add(error);
-        }
-
-        void addErrorSummary(String errorType, String objectName) {
-            errorsSummary.put(errorType, errorsSummary.getOrDefault(errorType, 0) + 1);
-            errorsExamples.computeIfAbsent(errorType, k -> new ArrayList<>());
-            List<String> examples = errorsExamples.get(errorType);
-            if (examples.size() < 5) {
-                examples.add(objectName);
-            }
-        }
-
-        void printDetailed() {
-            System.out.println("\n" + "=".repeat(80));
-            System.out.println("=== RÉSUMÉ DÉTAILLÉ DE LA MIGRATION ORACLE → POSTGRESQL ===");
-            System.out.println("=".repeat(80));
-            
-            printCategory("TABLES", tablesSuccess, tablesTotal, tablesFailed, failedTables);
-            printCategory("DONNÉES", dataSuccess, dataTotal, dataFailed, failedData);
-            if (dataRowsFailed > 0) {
-                System.out.println("   ⚠️  Lignes individuelles échouées: " + dataRowsFailed);
-            }
-            if (nullBytesRemoved > 0) {
-                System.out.println("   🔧 NULL bytes nettoyés: " + nullBytesRemoved);
-            }
-            printCategoryWithErrors("SÉQUENCES", sequencesSuccess, sequencesTotal, sequencesFailed, failedSequences);
-            printCategoryWithErrors("INDEX", indexSuccess, indexTotal, indexFailed, failedIndexes);
-            printCategory("CONTRAINTES PK", pkSuccess, pkTotal, 0, Collections.emptyList());
-            printCategoryWithErrors("CONTRAINTES FK", fkSuccess, fkTotal, fkFailed, failedFKs);
-            printCategoryWithErrors("CONTRAINTES UNIQUE", uniqueSuccess, uniqueTotal, uniqueFailed, failedUniques);
-            printCategoryWithErrors("CONTRAINTES CHECK", checkSuccess, checkTotal, checkFailed, failedChecks);
-            printCategoryWithErrors("VUES", viewsSuccess, viewsTotal, viewsFailed, failedViews);
-            printCategoryWithErrors("FONCTIONS", functionsSuccess, functionsTotal, functionsFailed, failedFunctions);
-            printCategoryWithErrors("TRIGGERS", triggersSuccess, triggersTotal, triggersFailed, failedTriggers);
-            
-            if (!warnings.isEmpty()) {
-                System.out.println("\n⚠️  AVERTISSEMENTS:");
-                warnings.forEach(w -> System.out.println("   " + w));
-            }
-            
-            // RÉSUMÉ DES LOGS GROUPÉ PAR TYPE D'ERREUR
-            if (!errorsSummary.isEmpty()) {
-                System.out.println("\n" + "=".repeat(80));
-                System.out.println("=== RÉSUMÉ DES ERREURS PAR TYPE ===");
-                System.out.println("=".repeat(80));
-                errorsSummary.forEach((errorType, count) -> {
-                    System.out.println(String.format("🔴 %-40s : %d occurrence(s)", errorType, count));
-                    List<String> examples = errorsExamples.get(errorType);
-                    if (examples != null && !examples.isEmpty()) {
-                        System.out.println("   Exemples: " + String.join(", ", examples.subList(0, Math.min(3, examples.size()))));
-                    }
-                });
-                System.out.println("=".repeat(80));
-            }
-            
-            System.out.println("\n" + "=".repeat(80));
-            
-            int totalObjets = tablesTotal + dataTotal + sequencesTotal + pkTotal + 
-                            fkTotal + uniqueTotal + checkTotal + indexTotal +
-                            viewsTotal + functionsTotal + triggersTotal;
-            int totalSuccess = tablesSuccess + dataSuccess + sequencesSuccess + pkSuccess + 
-                             fkSuccess + uniqueSuccess + checkSuccess + indexSuccess +
-                             viewsSuccess + functionsSuccess + triggersSuccess;
-            int totalFailed = tablesFailed + dataFailed + sequencesFailed + 
-                            fkFailed + uniqueFailed + checkFailed + indexFailed +
-                            viewsFailed + functionsFailed + triggersFailed;
-            
-            double globalScore = totalObjets > 0 ? (totalSuccess * 100.0 / totalObjets) : 0;
-            
-            System.out.println(String.format("🎯 SCORE GLOBAL : %.1f%% (%d/%d objets migrés avec succès, %d échecs)", 
-                globalScore, totalSuccess, totalObjets, totalFailed));
-            System.out.println("=".repeat(80) + "\n");
-        }
-        
-        private void printCategory(String name, int success, int total, int failed, List<String> failedList) {
-            double pct = total > 0 ? (success * 100.0 / total) : 0;
-            System.out.println(String.format("📊 %-20s : %d/%d migrés (%.1f%%) - %d échecs", 
-                name, success, total, pct, failed));
-            if (!failedList.isEmpty() && failedList.size() <= 5) {
-                System.out.println("   ❌ Échecs: " + String.join(", ", failedList));
-            } else if (failedList.size() > 5) {
-                System.out.println("   ❌ " + failed + " échecs (voir résumé ci-dessus)");
-            }
-        }
-        
-        private void printCategoryWithErrors(String name, int success, int total, int failed, Map<String, String> errors) {
-            double pct = total > 0 ? (success * 100.0 / total) : 0;
-            System.out.println(String.format("📊 %-20s : %d/%d migrés (%.1f%%) - %d échecs", 
-                name, success, total, pct, failed));
-            if (!errors.isEmpty() && errors.size() <= 3) {
-                errors.forEach((k, v) -> {
-                    String msg = v.length() > 80 ? v.substring(0, 80) + "..." : v;
-                    System.out.println("   ❌ " + k + ": " + msg);
-                });
-            } else if (errors.size() > 3) {
-                System.out.println("   ❌ " + failed + " échecs (voir résumé ci-dessus)");
-            }
-        }
-
-        void printAllErrorsDetailed() {
-            if (!allErrors.isEmpty()) {
-                System.out.println("\n" + "=".repeat(100));
-                System.out.println("=== TOUTES LES ERREURS DÉTAILLÉES ===");
-                System.out.println("=".repeat(100));
-                
-                for (String error : allErrors) {
-                    System.out.println(error);
-                    System.out.println("-".repeat(100));
-                }
-            }
-            
-            // Afficher aussi les erreurs par catégorie
-            printAllErrorsForCategory("FONCTIONS", failedFunctions);
-            printAllErrorsForCategory("VUES", failedViews);
-            printAllErrorsForCategoryList("TABLES", failedTables);  // CHANGÉ ICI
-            printAllErrorsForCategory("SÉQUENCES", failedSequences);
-            printAllErrorsForCategory("INDEX", failedIndexes);
-            printAllErrorsForCategory("CONTRAINTES FK", failedFKs);
-            printAllErrorsForCategory("CONTRAINTES UNIQUE", failedUniques);
-            printAllErrorsForCategory("TRIGGERS", failedTriggers);
-            printAllErrorsForCategoryList("DONNÉES (Tables)", failedData);  // CHANGÉ ICI
-                    
-            // Afficher aussi les listes d'erreurs
-            printAllErrorsForCategoryList("DONNÉES (Tables)", failedData);
-        }
-
-        private void printAllErrorsForCategory(String category, Map<String, String> errors) {
-            if (!errors.isEmpty()) {
-                System.out.println("\n--- " + category + " (" + errors.size() + " erreurs) ---");
-                errors.forEach((name, error) -> {
-                    System.out.println("🔴 " + name + ":");
-                    System.out.println("   Message: " + (error.length() > 200 ? error.substring(0, 200) + "..." : error));
-                    System.out.println("   Type: " + classifyError(error));
-                    System.out.println();
-                });
-            }
-        }
-        
-        private void printAllErrorsForCategoryList(String category, List<String> errors) {
-            if (!errors.isEmpty()) {
-                System.out.println("\n--- " + category + " (" + errors.size() + " erreurs) ---");
-                for (String error : errors) {
-                    System.out.println("🔴 " + error);
-                }
-                System.out.println();
-            }
-        }
-    }
-    
-    // ============================================================
-    // STATISTIQUES OBJETS INVALIDES
-    // ============================================================
-    
-    private static class InvalidObjectsStats {
-        int invalidSequences = 0;
-        int invalidViews = 0;
-        int invalidFunctions = 0;
-        int invalidTriggers = 0;
-        List<String> invalidSequencesList = new ArrayList<>();
-        List<String> invalidViewsList = new ArrayList<>();
-        List<String> invalidFunctionsList = new ArrayList<>();
-        List<String> invalidTriggersList = new ArrayList<>();
-        
-        void printInvalidStats() {
-            System.out.println("\n" + "=".repeat(80));
-            System.out.println("=== OBJETS INVALIDES DÉTECTÉS ===");
-            System.out.println("=".repeat(80));
-            
-            printInvalidCategory("SÉQUENCES", invalidSequences, invalidSequencesList);
-            printInvalidCategory("VUES", invalidViews, invalidViewsList);
-            printInvalidCategory("FONCTIONS", invalidFunctions, invalidFunctionsList);
-            printInvalidCategory("TRIGGERS", invalidTriggers, invalidTriggersList);
-            
-            int totalInvalid = invalidSequences + invalidViews + invalidFunctions + invalidTriggers;
-            System.out.println("=".repeat(80));
-            System.out.println(String.format("📊 TOTAL OBJETS INVALIDES : %d", totalInvalid));
-            System.out.println("=".repeat(80));
-        }
-        
-        private void printInvalidCategory(String name, int count, List<String> examples) {
-            if (count > 0) {
-                System.out.println(String.format("❌ %-20s : %d objets invalides", name, count));
-                if (!examples.isEmpty()) {
-                    System.out.println("   Exemples: " + 
-                        examples.subList(0, Math.min(5, examples.size())));
-                }
-            }
-        }
-    }
-    
-    // ============================================================
-    // OBJETS VALIDÉS
-    // ============================================================
-    
-    private static class DatabaseObjects {
-        String owner;
-        Set<String> validTables = new HashSet<>();
-        Set<String> validSequences = new HashSet<>();
-        Set<String> validViews = new HashSet<>();
-        Set<String> validFunctions = new HashSet<>();
-        Set<String> validTriggers = new HashSet<>();
-        Map<String, Boolean> pkEnabledByTable = new HashMap<>();
-        Map<String, String> viewDefinitions = new HashMap<>();
-        Map<String, Set<String>> viewDependencies = new HashMap<>();
-        Map<String, Set<String>> missingDependencies = new HashMap<>();
-        InvalidObjectsStats invalidStats;
-    }
     
     // ============================================================
     // UTILITAIRES
@@ -275,37 +28,6 @@ public class OracleService {
             }
         }
         return value;
-    }
-    
-    private static String classifyError(String errorMessage) {
-        if (errorMessage == null) return "Erreur inconnue";
-        
-        errorMessage = errorMessage.toLowerCase();
-        if (errorMessage.contains("relation") && errorMessage.contains("n'existe pas")) {
-            return "Relation inexistante (vue dépendante)";
-        } else if (errorMessage.contains("erreur de syntaxe") || errorMessage.contains("syntax error")) {
-            return "Erreur de syntaxe SQL";
-        } else if (errorMessage.contains("fonction") && errorMessage.contains("n'existe pas")) {
-            return "Fonction inexistante";
-        } else if (errorMessage.contains("colonne") && errorMessage.contains("plus d'une fois")) {
-            return "Colonne dupliquée";
-        } else if (errorMessage.contains("colonne") && errorMessage.contains("n'existe pas")) {
-            return "Colonne inexistante";
-        } else if (errorMessage.contains("type") && errorMessage.contains("n'existe pas")) {
-            return "Type inexistant";
-        } else if (errorMessage.contains("alias")) {
-            return "Alias manquant dans sous-requête";
-        } else if (errorMessage.contains("invalid") || errorMessage.contains("invalide")) {
-            return "Objet invalide dans Oracle";
-        } else if (errorMessage.contains("source vide")) {
-            return "Source code inaccessible";
-        } else if (errorMessage.contains("conversion non supportée")) {
-            return "Syntaxe complexe non supportée";
-        } else if (errorMessage.contains("sous-requête du from doit avoir un alias")) {
-            return "Alias manquant dans sous-requête";
-        } else {
-            return "Autre erreur";
-        }
     }
     
     // ============================================================
@@ -461,51 +183,51 @@ public class OracleService {
         System.out.println("❌ Séquences invalides: " + invalidStats.invalidSequences);
         
         // Vues avec statut VALID/INVALID et définitions
-        Map<String, String> fullViewDefinitions = new HashMap<>(); // NOUVEAU
-    
-    try (PreparedStatement ps = ora.prepareStatement(
-        "SELECT object_name, status FROM all_objects " +
-        "WHERE owner=? AND object_type='VIEW' ORDER BY object_name")) {
-        ps.setString(1, db.owner);
-        try (ResultSet rs = ps.executeQuery()) {
-            while (rs.next()) {
-                String viewName = rs.getString(1);
-                String status = rs.getString(2);
-                if ("VALID".equalsIgnoreCase(status)) {
-                    db.validViews.add(viewName);
-                    
-                    // Récupérer définition SELECT
-                    try (PreparedStatement psView = ora.prepareStatement(
-                        "SELECT text FROM all_views WHERE owner=? AND view_name=?")) {
-                        psView.setString(1, db.owner);
-                        psView.setString(2, viewName.toUpperCase());
-                        try (ResultSet rsView = psView.executeQuery()) {
-                            if (rsView.next()) {
-                                db.viewDefinitions.put(viewName, rsView.getString(1));
+        Map<String, String> fullViewDefinitions = new HashMap<>();
+
+        try (PreparedStatement ps = ora.prepareStatement(
+            "SELECT object_name, status FROM all_objects " +
+            "WHERE owner=? AND object_type='VIEW' ORDER BY object_name")) {
+            ps.setString(1, db.owner);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String viewName = rs.getString(1);
+                    String status = rs.getString(2);
+                    if ("VALID".equalsIgnoreCase(status)) {
+                        db.validViews.add(viewName);
+                        
+                        // Récupérer définition SELECT
+                        try (PreparedStatement psView = ora.prepareStatement(
+                            "SELECT text FROM all_views WHERE owner=? AND view_name=?")) {
+                            psView.setString(1, db.owner);
+                            psView.setString(2, viewName.toUpperCase());
+                            try (ResultSet rsView = psView.executeQuery()) {
+                                if (rsView.next()) {
+                                    db.viewDefinitions.put(viewName, rsView.getString(1));
+                                }
                             }
                         }
-                    }
-                    
-                    // NOUVEAU : Récupérer aussi la définition complète avec CREATE
-                    try (PreparedStatement psFullView = ora.prepareStatement(
-                        "SELECT DBMS_METADATA.GET_DDL('VIEW', ?, ?) FROM DUAL")) {
-                        psFullView.setString(1, viewName.toUpperCase());
-                        psFullView.setString(2, db.owner.toUpperCase());
-                        try (ResultSet rsFull = psFullView.executeQuery()) {
-                            if (rsFull.next()) {
-                                fullViewDefinitions.put(viewName, rsFull.getString(1));
+                        
+                        // Récupérer aussi la définition complète avec CREATE
+                        try (PreparedStatement psFullView = ora.prepareStatement(
+                            "SELECT DBMS_METADATA.GET_DDL('VIEW', ?, ?) FROM DUAL")) {
+                            psFullView.setString(1, viewName.toUpperCase());
+                            psFullView.setString(2, db.owner.toUpperCase());
+                            try (ResultSet rsFull = psFullView.executeQuery()) {
+                                if (rsFull.next()) {
+                                    fullViewDefinitions.put(viewName, rsFull.getString(1));
+                                }
                             }
+                        } catch (Exception e) {
+                            // Ignorer si DBMS_METADATA n'est pas accessible
                         }
-                    } catch (Exception e) {
-                        // Ignorer si DBMS_METADATA n'est pas accessible
+                    } else {
+                        invalidStats.invalidViews++;
+                        invalidStats.invalidViewsList.add(viewName);
                     }
-                } else {
-                    invalidStats.invalidViews++;
-                    invalidStats.invalidViewsList.add(viewName);
                 }
             }
         }
-    }
     
         System.out.println("✅ Vues valides: " + db.validViews.size());
         System.out.println("❌ Vues invalides: " + invalidStats.invalidViews);
@@ -757,7 +479,7 @@ public class OracleService {
             } catch (Exception e) {
                 stats.sequencesFailed++;
                 stats.failedSequences.put(seqName, e.getMessage());
-                stats.addErrorSummary(classifyError(e.getMessage()), seqName);
+                stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), seqName);
                 stats.addError("❌ SÉQUENCE " + seqName + ": " + e.getMessage());
             }
         }
@@ -859,7 +581,7 @@ public class OracleService {
             } catch (Exception e) {
                 stats.tablesFailed++;
                 stats.failedTables.add(table);
-                stats.addErrorSummary(classifyError(e.getMessage()), table);
+                stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), table);
                 stats.addError("❌ TABLE " + table + ": " + e.getMessage());
             }
         }
@@ -901,7 +623,7 @@ public class OracleService {
             } catch (Exception e) {
                 stats.dataFailed++;
                 stats.failedData.add(table);
-                stats.addErrorSummary(classifyError(e.getMessage()), table);
+                stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), table);
                 stats.addError("❌ DONNÉES " + table + ": " + e.getMessage());
             }
         }
@@ -1071,7 +793,7 @@ public class OracleService {
                         } catch (Exception ex) {
                             stats.indexFailed++;
                             stats.failedIndexes.put(idxName, ex.getMessage());
-                            stats.addErrorSummary(classifyError(ex.getMessage()), idxName);
+                            stats.addErrorSummary(MigrationStats.classifyError(ex.getMessage()), idxName);
                             stats.addError("❌ INDEX " + idxName + ": " + ex.getMessage());
                         }
                     }
@@ -1138,7 +860,7 @@ public class OracleService {
                 } catch (Exception e) {
                     stats.fkFailed++;
                     stats.failedFKs.put(fkName, e.getMessage());
-                    stats.addErrorSummary(classifyError(e.getMessage()), fkName);
+                    stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), fkName);
                     stats.addError("❌ FK " + fkName + ": " + e.getMessage());
                 }
             }
@@ -1176,7 +898,7 @@ public class OracleService {
                 } catch (Exception e) {
                     stats.uniqueFailed++;
                     stats.failedUniques.put(ukName, e.getMessage());
-                    stats.addErrorSummary(classifyError(e.getMessage()), ukName);
+                    stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), ukName);
                     stats.addError("❌ UNIQUE " + ukName + ": " + e.getMessage());
                 }
             }
@@ -1186,598 +908,531 @@ public class OracleService {
         
         System.out.println("⚠️  CHECK constraints ignorées (SEARCH_CONDITION type LONG incompatible)");
     }
-// ============================================================
-// MIGRATION VUES - VERSION AVEC PRÉSERVATION DES ALIAS
-// ============================================================
 
-private static void migrateViews(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
-    System.out.println("\n👁️  MIGRATION DES VUES...");
-    stats.viewsTotal = db.validViews.size();
+    // ============================================================
+    // MIGRATION VUES
+    // ============================================================
 
-    if (db.invalidStats != null && db.invalidStats.invalidViews > 0) {
-        System.out.println("❌ Vues invalides ignorées: " + db.invalidStats.invalidViews);
-    }
+    private static void migrateViews(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
+        System.out.println("\n👁️  MIGRATION DES VUES...");
+        stats.viewsTotal = db.validViews.size();
 
-    List<String> sortedViews = sortViewsByDependencies(db);
-    Set<String> migrated = new HashSet<>();
-    int maxPasses = 10;
+        if (db.invalidStats != null && db.invalidStats.invalidViews > 0) {
+            System.out.println("❌ Vues invalides ignorées: " + db.invalidStats.invalidViews);
+        }
 
-    for (int pass = 1; pass <= maxPasses; pass++) {
-        System.out.println("Passe " + pass + "/" + maxPasses + " pour les vues...");
-        int successThisPass = 0;
+        List<String> sortedViews = sortViewsByDependencies(db);
+        Set<String> migrated = new HashSet<>();
+        int maxPasses = 10;
 
-        for (String viewName : sortedViews) {
-            if (migrated.contains(viewName)) continue;
+        for (int pass = 1; pass <= maxPasses; pass++) {
+            System.out.println("Passe " + pass + "/" + maxPasses + " pour les vues...");
+            int successThisPass = 0;
 
-            try {
-                String viewDef = db.viewDefinitions.get(viewName);
-                if (viewDef == null || viewDef.trim().isEmpty()) {
-                    stats.viewsFailed++;
-                    stats.failedViews.put(viewName, "Définition de vue vide");
-                    migrated.add(viewName);
-                    continue;
-                }
+            for (String viewName : sortedViews) {
+                if (migrated.contains(viewName)) continue;
 
-                // NOUVELLE FONCTION : Récupérer les alias de colonnes depuis Oracle
-                List<String> columnAliases = getViewColumnAliases(ora, db.owner, viewName);
-                
-                // Convertir la vue avec préservation des alias
-                String pgView = convertViewWithAliases(viewName, viewDef, columnAliases);
-
-                try (Statement st = pg.createStatement()) {
-                    st.executeUpdate(pgView);
-                    migrated.add(viewName);
-                    stats.viewsSuccess++;
-                    successThisPass++;
-                    System.out.println("✅ Vue: " + viewName);
-                } catch (Exception e) {
-                    String errorMsg = e.getMessage();
-                    boolean isDependencyError = errorMsg != null && (
-                        errorMsg.toLowerCase().contains("n'existe pas") ||
-                        errorMsg.toLowerCase().contains("does not exist")
-                    );
-
-                    if (isDependencyError && pass < maxPasses) {
-                        System.out.println("⏳ Vue en attente (dépendances): " + viewName);
-                    } else {
+                try {
+                    String viewDef = db.viewDefinitions.get(viewName);
+                    if (viewDef == null || viewDef.trim().isEmpty()) {
                         stats.viewsFailed++;
-                        stats.failedViews.put(viewName, errorMsg);
-                        stats.addErrorSummary(classifyError(errorMsg), viewName);
-                        stats.addError("❌ VUE " + viewName + ": " + errorMsg);
+                        stats.failedViews.put(viewName, "Définition de vue vide");
+                        migrated.add(viewName);
+                        continue;
+                    }
+
+                    // Récupérer les alias de colonnes depuis Oracle
+                    List<String> columnAliases = getViewColumnAliases(ora, db.owner, viewName);
+                    
+                    // Convertir la vue avec préservation des alias
+                    String pgView = convertViewWithAliases(viewName, viewDef, columnAliases);
+
+                    try (Statement st = pg.createStatement()) {
+                        st.executeUpdate(pgView);
+                        migrated.add(viewName);
+                        stats.viewsSuccess++;
+                        successThisPass++;
+                        System.out.println("✅ Vue: " + viewName);
+                    } catch (Exception e) {
+                        String errorMsg = e.getMessage();
+                        boolean isDependencyError = errorMsg != null && (
+                            errorMsg.toLowerCase().contains("n'existe pas") ||
+                            errorMsg.toLowerCase().contains("does not exist")
+                        );
+
+                        if (isDependencyError && pass < maxPasses) {
+                            System.out.println("⏳ Vue en attente (dépendances): " + viewName);
+                        } else {
+                            stats.viewsFailed++;
+                            stats.failedViews.put(viewName, errorMsg);
+                            stats.addErrorSummary(MigrationStats.classifyError(errorMsg), viewName);
+                            stats.addError("❌ VUE " + viewName + ": " + errorMsg);
+                            migrated.add(viewName);
+                        }
+                    }
+                } catch (Exception e) {
+                    if (pass == maxPasses) {
+                        stats.viewsFailed++;
+                        stats.failedViews.put(viewName, e.getMessage());
+                        stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), viewName);
+                        stats.addError("❌ VUE " + viewName + ": " + e.getMessage());
                         migrated.add(viewName);
                     }
                 }
-            } catch (Exception e) {
-                if (pass == maxPasses) {
-                    stats.viewsFailed++;
-                    stats.failedViews.put(viewName, e.getMessage());
-                    stats.addErrorSummary(classifyError(e.getMessage()), viewName);
-                    stats.addError("❌ VUE " + viewName + ": " + e.getMessage());
-                    migrated.add(viewName);
+            }
+
+            System.out.println("Passe " + pass + ": " + successThisPass + " succès");
+            if (migrated.size() >= db.validViews.size() || (successThisPass == 0 && pass > 2)) break;
+        }
+
+        System.out.println("Vues migrées: " + stats.viewsSuccess + "/" + stats.viewsTotal);
+    }
+
+    // ============================================================
+    // RÉCUPÉRATION DES ALIAS DE COLONNES ORACLE
+    // ============================================================
+
+    private static List<String> getViewColumnAliases(Connection ora, String owner, String viewName) {
+        List<String> aliases = new ArrayList<>();
+        
+        String sql = "SELECT column_name FROM all_tab_columns " +
+                     "WHERE owner = ? AND table_name = ? " +
+                     "ORDER BY column_id";
+        
+        try (PreparedStatement ps = ora.prepareStatement(sql)) {
+            ps.setString(1, owner.toUpperCase());
+            ps.setString(2, viewName.toUpperCase());
+            
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    aliases.add(rs.getString(1));
                 }
             }
-        }
-
-        System.out.println("Passe " + pass + ": " + successThisPass + " succès");
-        if (migrated.size() >= db.validViews.size() || (successThisPass == 0 && pass > 2)) break;
-    }
-
-    System.out.println("Vues migrées: " + stats.viewsSuccess + "/" + stats.viewsTotal);
-}
-
-// ============================================================
-// RÉCUPÉRATION DES ALIAS DE COLONNES ORACLE
-// ============================================================
-
-private static List<String> getViewColumnAliases(Connection ora, String owner, String viewName) {
-    List<String> aliases = new ArrayList<>();
-    
-    String sql = "SELECT column_name FROM all_tab_columns " +
-                 "WHERE owner = ? AND table_name = ? " +
-                 "ORDER BY column_id";
-    
-    try (PreparedStatement ps = ora.prepareStatement(sql)) {
-        ps.setString(1, owner.toUpperCase());
-        ps.setString(2, viewName.toUpperCase());
-        
-        try (ResultSet rs = ps.executeQuery()) {
-            while (rs.next()) {
-                aliases.add(rs.getString(1));
-            }
-        }
-    } catch (SQLException e) {
-        System.err.println("⚠️  Impossible de récupérer les alias pour " + viewName + ": " + e.getMessage());
-    }
-    
-    return aliases;
-}
-
-// ============================================================
-// CONVERSION AVEC PRÉSERVATION DES ALIAS
-// ============================================================
-
-private static String convertViewWithAliases(String viewName, String oracleSql, List<String> columnAliases) {
-    String sql = oracleSql.trim();
-    
-    // Étape 1: Conversion des jointures externes Oracle (+)
-    sql = convertOracleOuterJoinsToLeftJoin(sql);
-    
-    // Étape 2: Corriger les colonnes dupliquées
-    sql = fixDuplicateColumnsInSelect(sql);
-    
-    // Étape 3: Ajouter alias aux sous-requêtes
-    sql = fixSubqueriesWithoutAlias(sql);
-    
-    // Étape 4: Conversions de fonctions de base
-    sql = sql
-        .replaceAll("(?i)\\bSYSDATE\\b", "CURRENT_TIMESTAMP")
-        .replaceAll("(?i)\\bNVL\\s*\\(", "COALESCE(")
-        .replaceAll("(?i)\\bSUBSTR\\s*\\(", "SUBSTRING(")
-        .replaceAll("(?i)\\bTO_DATE\\s*\\(", "TO_TIMESTAMP(")
-        .replaceAll("(?i)\\bTO_CHAR\\s*\\(", "TO_CHAR(")
-        .replaceAll("(?i)(\\w+)\\.NEXTVAL", "NEXTVAL('$1')")
-        .replaceAll("(?i)(\\w+)\\.CURRVAL", "CURRVAL('$1')")
-        .replaceAll("(?i)FROM\\s+DUAL\\b", "")
-        .replaceAll("(?i)\\bVARCHAR2\\b", "VARCHAR")
-        .replaceAll("(?i)\\bNUMBER\\b", "NUMERIC");
-    
-    // Étape 5: Minuscules
-    sql = sql.toLowerCase();
-    
-    // Étape 6: NOUVEAU - Construire la clause CREATE avec les alias explicites
-    if (!columnAliases.isEmpty()) {
-        StringBuilder viewSql = new StringBuilder("CREATE OR REPLACE VIEW ");
-        viewSql.append(quotePg(viewName));
-        viewSql.append(" (");
-        
-        // Ajouter les alias de colonnes
-        for (int i = 0; i < columnAliases.size(); i++) {
-            viewSql.append(quotePg(columnAliases.get(i)));
-            if (i < columnAliases.size() - 1) {
-                viewSql.append(", ");
-            }
+        } catch (SQLException e) {
+            System.err.println("⚠️  Impossible de récupérer les alias pour " + viewName + ": " + e.getMessage());
         }
         
-        viewSql.append(") AS ");
-        viewSql.append(sql);
-        
-        return viewSql.toString();
-    } else {
-        return "error"; // Forcer l'échec si pas d'alias
+        return aliases;
     }
-}
 
-// ============================================================
-// MÉTHODE ALTERNATIVE : EXTRACTION ALIAS DEPUIS LA DÉFINITION
-// ============================================================
+    // ============================================================
+    // CONVERSION AVEC PRÉSERVATION DES ALIAS
+    // ============================================================
 
-/**
- * Méthode alternative pour extraire les alias depuis le CREATE VIEW Oracle
- * Utilisée si getViewColumnAliases échoue
- */
-private static List<String> extractAliasesFromOracleDefinition(String oracleCreateView) {
-    List<String> aliases = new ArrayList<>();
-    
-    // Pattern pour capturer: CREATE VIEW nom (col1, col2, col3) AS
-    Pattern pattern = Pattern.compile(
-        "CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:FORCE\\s+)?VIEW\\s+\"?\\w+\"?\\.\"?(\\w+)\"?\\s*\\(([^)]+)\\)",
-        Pattern.CASE_INSENSITIVE
-    );
-    
-    Matcher matcher = pattern.matcher(oracleCreateView);
-    
-    if (matcher.find()) {
-        String columnsList = matcher.group(2);
-        // Séparer les colonnes
-        String[] cols = columnsList.split(",");
-        for (String col : cols) {
-            // Nettoyer les guillemets et espaces
-            String cleaned = col.trim().replaceAll("\"", "");
-            aliases.add(cleaned);
-        }
-    }
-    
-    return aliases;
-}
-
-// ============================================================
-// CONVERSION ROBUSTE AVEC GESTION DES ERREURS COURANTES
-// ============================================================
-
-private static String convertViewRobust(String viewName, String oracleSql) {
-    String sql = oracleSql.trim();
-    
-    // Étape 1: Conversion des jointures externes Oracle (+)
-    sql = convertOracleOuterJoinsToLeftJoin(sql);
-    
-    // Étape 2: Corriger les colonnes dupliquées
-    sql = fixDuplicateColumnsInSelect(sql);
-    
-    // Étape 3: Ajouter alias aux sous-requêtes
-    sql = fixSubqueriesWithoutAlias(sql);
-    
-    // Étape 4: Conversions de fonctions de base
-    sql = sql
-        .replaceAll("(?i)\\bSYSDATE\\b", "CURRENT_TIMESTAMP")
-        .replaceAll("(?i)\\bNVL\\s*\\(", "COALESCE(")
-        .replaceAll("(?i)\\bSUBSTR\\s*\\(", "SUBSTRING(")
-        .replaceAll("(?i)\\bTO_DATE\\s*\\(", "TO_TIMESTAMP(")
-        .replaceAll("(?i)\\bTO_CHAR\\s*\\(", "TO_CHAR(")
-        .replaceAll("(?i)(\\w+)\\.NEXTVAL", "NEXTVAL('$1')")
-        .replaceAll("(?i)(\\w+)\\.CURRVAL", "CURRVAL('$1')")
-        .replaceAll("(?i)FROM\\s+DUAL\\b", "")
-        .replaceAll("(?i)\\bVARCHAR2\\b", "VARCHAR")
-        .replaceAll("(?i)\\bNUMBER\\b", "NUMERIC");
-    
-    // Étape 5: Minuscules
-    sql = sql.toLowerCase();
-    
-    return "CREATE OR REPLACE VIEW " + quotePg(viewName) + " AS " + sql;
-}
-
-// ============================================================
-// CORRECTION DES COLONNES DUPLIQUÉES
-// ============================================================
-
-private static String fixDuplicateColumnsInSelect(String sql) {
-    // Trouve toutes les clauses SELECT
-    Pattern selectPattern = Pattern.compile("(SELECT\\s+)(.*?)(\\s+FROM)", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
-    Matcher matcher = selectPattern.matcher(sql);
-    
-    StringBuffer result = new StringBuffer();
-    
-    while (matcher.find()) {
-        String selectKeyword = matcher.group(1);
-        String columnsPart = matcher.group(2);
-        String fromKeyword = matcher.group(3);
+    private static String convertViewWithAliases(String viewName, String oracleSql, List<String> columnAliases) {
+        String sql = oracleSql.trim();
         
-        // Analyser les colonnes
-        List<String> columns = splitColumns(columnsPart);
-        Map<String, Integer> columnCounts = new HashMap<>();
-        List<String> fixedColumns = new ArrayList<>();
+        // Étape 1: Conversion des jointures externes Oracle (+)
+        sql = convertOracleOuterJoinsToLeftJoin(sql);
         
-        for (String column : columns) {
-            String colName = extractColumnAlias(column);
+        // Étape 2: Corriger les colonnes dupliquées
+        sql = fixDuplicateColumnsInSelect(sql);
+        
+        // Étape 3: Ajouter alias aux sous-requêtes
+        sql = fixSubqueriesWithoutAlias(sql);
+        
+        // Étape 4: Conversions de fonctions de base
+        sql = sql
+            .replaceAll("(?i)\\bSYSDATE\\b", "CURRENT_TIMESTAMP")
+            .replaceAll("(?i)\\bNVL\\s*\\(", "COALESCE(")
+            .replaceAll("(?i)\\bSUBSTR\\s*\\(", "SUBSTRING(")
+            .replaceAll("(?i)\\bTO_DATE\\s*\\(", "TO_TIMESTAMP(")
+            .replaceAll("(?i)\\bTO_CHAR\\s*\\(", "TO_CHAR(")
+            .replaceAll("(?i)(\\w+)\\.NEXTVAL", "NEXTVAL('$1')")
+            .replaceAll("(?i)(\\w+)\\.CURRVAL", "CURRVAL('$1')")
+            .replaceAll("(?i)FROM\\s+DUAL\\b", "")
+            .replaceAll("(?i)\\bVARCHAR2\\b", "VARCHAR")
+            .replaceAll("(?i)\\bNUMBER\\b", "NUMERIC");
+        
+        // Étape 5: Minuscules
+        sql = sql.toLowerCase();
+        
+        // Étape 6: Construire la clause CREATE avec les alias explicites
+        if (!columnAliases.isEmpty()) {
+            StringBuilder viewSql = new StringBuilder("CREATE OR REPLACE VIEW ");
+            viewSql.append(quotePg(viewName));
+            viewSql.append(" (");
             
-            int count = columnCounts.getOrDefault(colName, 0);
-            columnCounts.put(colName, count + 1);
-            
-            if (count > 0) {
-                // Colonne dupliquée - ajouter un alias unique
-                String newAlias = colName + "_dup" + (count + 1);
-                if (column.toUpperCase().contains(" AS ")) {
-                    // Remplacer l'alias existant
-                    column = column.replaceAll("(?i)\\s+AS\\s+\\w+$", " AS " + newAlias);
-                } else {
-                    // Ajouter un alias
-                    column = column + " AS " + newAlias;
+            // Ajouter les alias de colonnes
+            for (int i = 0; i < columnAliases.size(); i++) {
+                viewSql.append(quotePg(columnAliases.get(i)));
+                if (i < columnAliases.size() - 1) {
+                    viewSql.append(", ");
                 }
             }
             
-            fixedColumns.add(column);
-        }
-        
-        String fixedColumnsPart = String.join(", ", fixedColumns);
-        matcher.appendReplacement(result, Matcher.quoteReplacement(selectKeyword + fixedColumnsPart + fromKeyword));
-    }
-    
-    matcher.appendTail(result);
-    return result.toString();
-}
-
-// Diviser les colonnes en tenant compte des parenthèses et virgules
-private static List<String> splitColumns(String columnsPart) {
-    List<String> columns = new ArrayList<>();
-    StringBuilder current = new StringBuilder();
-    int parenLevel = 0;
-    
-    for (int i = 0; i < columnsPart.length(); i++) {
-        char c = columnsPart.charAt(i);
-        
-        if (c == '(') {
-            parenLevel++;
-            current.append(c);
-        } else if (c == ')') {
-            parenLevel--;
-            current.append(c);
-        } else if (c == ',' && parenLevel == 0) {
-            columns.add(current.toString().trim());
-            current = new StringBuilder();
+            viewSql.append(") AS ");
+            viewSql.append(sql);
+            
+            return viewSql.toString();
         } else {
-            current.append(c);
+            return "error"; // Forcer l'échec si pas d'alias
         }
     }
-    
-    if (current.length() > 0) {
-        columns.add(current.toString().trim());
-    }
-    
-    return columns;
-}
 
-// Extraire le nom de la colonne ou son alias
-private static String extractColumnAlias(String column) {
-    // Chercher un alias explicite (AS quelquechose)
-    Pattern aliasPattern = Pattern.compile("\\s+AS\\s+(\\w+)$", Pattern.CASE_INSENSITIVE);
-    Matcher aliasMatcher = aliasPattern.matcher(column);
-    
-    if (aliasMatcher.find()) {
-        return aliasMatcher.group(1).toLowerCase();
-    }
-    
-    // Sinon, prendre le dernier mot (qui est souvent l'alias implicite)
-    String[] parts = column.trim().split("\\s+");
-    if (parts.length > 0) {
-        String lastPart = parts[parts.length - 1];
-        // Nettoyer les caractères spéciaux
-        return lastPart.replaceAll("[^a-zA-Z0-9_]", "").toLowerCase();
-    }
-    
-    return "col";
-}
+    // ============================================================
+    // CORRECTION DES COLONNES DUPLIQUÉES
+    // ============================================================
 
-// ============================================================
-// AJOUTER DES ALIAS AUX SOUS-REQUÊTES
-// ============================================================
-
-private static String fixSubqueriesWithoutAlias(String sql) {
-    // Pattern pour détecter les sous-requêtes sans alias dans FROM
-    Pattern pattern = Pattern.compile(
-        "FROM\\s*\\(\\s*SELECT.*?\\)(?!\\s+\\w+)(?=\\s*(?:WHERE|GROUP|ORDER|UNION|LIMIT|\\)|,|$))",
-        Pattern.CASE_INSENSITIVE | Pattern.DOTALL
-    );
-    
-    Matcher matcher = pattern.matcher(sql);
-    StringBuffer result = new StringBuffer();
-    int aliasCounter = 1;
-    
-    while (matcher.find()) {
-        String subquery = matcher.group();
-        String replacement = subquery + " AS subq_" + aliasCounter;
-        matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
-        aliasCounter++;
-    }
-    
-    matcher.appendTail(result);
-    return result.toString();
-}
-
-// ============================================================
-// CONVERSION DES JOINTURES EXTERNES ORACLE (+) → LEFT JOIN
-// ============================================================
-
-private static String convertOracleOuterJoinsToLeftJoin(String sql) {
-    if (!sql.contains("(+)")) {
-        return sql;
-    }
-    
-    try {
-        String upperSql = sql.toUpperCase();
-        int fromIdx = upperSql.indexOf("FROM");
-        int whereIdx = upperSql.indexOf("WHERE");
+    private static String fixDuplicateColumnsInSelect(String sql) {
+        // Trouve toutes les clauses SELECT
+        Pattern selectPattern = Pattern.compile("(SELECT\\s+)(.*?)(\\s+FROM)", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+        Matcher matcher = selectPattern.matcher(sql);
         
-        if (fromIdx == -1 || whereIdx == -1) {
+        StringBuffer result = new StringBuffer();
+        
+        while (matcher.find()) {
+            String selectKeyword = matcher.group(1);
+            String columnsPart = matcher.group(2);
+            String fromKeyword = matcher.group(3);
+            
+            // Analyser les colonnes
+            List<String> columns = splitColumns(columnsPart);
+            Map<String, Integer> columnCounts = new HashMap<>();
+            List<String> fixedColumns = new ArrayList<>();
+            
+            for (String column : columns) {
+                String colName = extractColumnAlias(column);
+                
+                int count = columnCounts.getOrDefault(colName, 0);
+                columnCounts.put(colName, count + 1);
+                
+                if (count > 0) {
+                    // Colonne dupliquée - ajouter un alias unique
+                    String newAlias = colName + "_dup" + (count + 1);
+                    if (column.toUpperCase().contains(" AS ")) {
+                        // Remplacer l'alias existant
+                        column = column.replaceAll("(?i)\\s+AS\\s+\\w+$", " AS " + newAlias);
+                    } else {
+                        // Ajouter un alias
+                        column = column + " AS " + newAlias;
+                    }
+                }
+                
+                fixedColumns.add(column);
+            }
+            
+            String fixedColumnsPart = String.join(", ", fixedColumns);
+            matcher.appendReplacement(result, Matcher.quoteReplacement(selectKeyword + fixedColumnsPart + fromKeyword));
+        }
+        
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
+    // Diviser les colonnes en tenant compte des parenthèses et virgules
+    private static List<String> splitColumns(String columnsPart) {
+        List<String> columns = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        int parenLevel = 0;
+        
+        for (int i = 0; i < columnsPart.length(); i++) {
+            char c = columnsPart.charAt(i);
+            
+            if (c == '(') {
+                parenLevel++;
+                current.append(c);
+            } else if (c == ')') {
+                parenLevel--;
+                current.append(c);
+            } else if (c == ',' && parenLevel == 0) {
+                columns.add(current.toString().trim());
+                current = new StringBuilder();
+            } else {
+                current.append(c);
+            }
+        }
+        
+        if (current.length() > 0) {
+            columns.add(current.toString().trim());
+        }
+        
+        return columns;
+    }
+
+    // Extraire le nom de la colonne ou son alias
+    private static String extractColumnAlias(String column) {
+        // Chercher un alias explicite (AS quelquechose)
+        Pattern aliasPattern = Pattern.compile("\\s+AS\\s+(\\w+)$", Pattern.CASE_INSENSITIVE);
+        Matcher aliasMatcher = aliasPattern.matcher(column);
+        
+        if (aliasMatcher.find()) {
+            return aliasMatcher.group(1).toLowerCase();
+        }
+        
+        // Sinon, prendre le dernier mot (qui est souvent l'alias implicite)
+        String[] parts = column.trim().split("\\s+");
+        if (parts.length > 0) {
+            String lastPart = parts[parts.length - 1];
+            // Nettoyer les caractères spéciaux
+            return lastPart.replaceAll("[^a-zA-Z0-9_]", "").toLowerCase();
+        }
+        
+        return "col";
+    }
+
+    // ============================================================
+    // AJOUTER DES ALIAS AUX SOUS-REQUÊTES
+    // ============================================================
+
+    private static String fixSubqueriesWithoutAlias(String sql) {
+        // Pattern pour détecter les sous-requêtes sans alias dans FROM
+        Pattern pattern = Pattern.compile(
+            "FROM\\s*\\(\\s*SELECT.*?\\)(?!\\s+\\w+)(?=\\s*(?:WHERE|GROUP|ORDER|UNION|LIMIT|\\)|,|$))",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+        );
+        
+        Matcher matcher = pattern.matcher(sql);
+        StringBuffer result = new StringBuffer();
+        int aliasCounter = 1;
+        
+        while (matcher.find()) {
+            String subquery = matcher.group();
+            String replacement = subquery + " AS subq_" + aliasCounter;
+            matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
+            aliasCounter++;
+        }
+        
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
+    // ============================================================
+    // CONVERSION DES JOINTURES EXTERNES ORACLE (+) → LEFT JOIN
+    // ============================================================
+
+    private static String convertOracleOuterJoinsToLeftJoin(String sql) {
+        if (!sql.contains("(+)")) {
+            return sql;
+        }
+        
+        try {
+            String upperSql = sql.toUpperCase();
+            int fromIdx = upperSql.indexOf("FROM");
+            int whereIdx = upperSql.indexOf("WHERE");
+            
+            if (fromIdx == -1 || whereIdx == -1) {
+                return sql.replaceAll("\\s*\\(\\s*\\+\\s*\\)", "");
+            }
+            
+            String selectPart = sql.substring(0, fromIdx);
+            String fromPart = sql.substring(fromIdx + 4, whereIdx).trim();
+            String wherePart = sql.substring(whereIdx + 5).trim();
+            
+            // Trouver la fin du WHERE
+            String afterWhere = "";
+            String whereConditions = wherePart;
+            
+            for (String keyword : new String[]{"GROUP BY", "ORDER BY", "UNION", "HAVING"}) {
+                int idx = wherePart.toUpperCase().indexOf(keyword);
+                if (idx != -1) {
+                    whereConditions = wherePart.substring(0, idx).trim();
+                    afterWhere = " " + wherePart.substring(idx);
+                    break;
+                }
+            }
+            
+            // Parser les tables avec leurs alias
+            Map<String, TableInfo> tables = parseTablesFromClause(fromPart);
+            
+            // Parser les conditions WHERE
+            List<String> conditions = splitWhereConditions(whereConditions);
+            Map<String, List<String>> leftJoinConditions = new LinkedHashMap<>();
+            List<String> normalConditions = new ArrayList<>();
+            Set<String> outerJoinTables = new HashSet<>();
+            
+            for (String condition : conditions) {
+                OuterJoinInfo joinInfo = extractOuterJoinInfo(condition);
+                
+                if (joinInfo != null) {
+                    outerJoinTables.add(joinInfo.outerTable);
+                    leftJoinConditions.computeIfAbsent(joinInfo.outerTable, k -> new ArrayList<>())
+                        .add(joinInfo.joinCondition);
+                } else {
+                    normalConditions.add(condition.replaceAll("\\s*\\(\\s*\\+\\s*\\)", ""));
+                }
+            }
+            
+            // Reconstruire la requête
+            StringBuilder result = new StringBuilder(selectPart);
+            result.append("FROM ");
+            
+            // Trouver la table principale
+            String mainTable = findMainTable(tables, outerJoinTables);
+            if (mainTable != null) {
+                result.append(mainTable);
+            }
+            
+            // Ajouter LEFT JOIN pour les tables outer join
+            for (Map.Entry<String, TableInfo> entry : tables.entrySet()) {
+                String alias = entry.getKey();
+                TableInfo tableInfo = entry.getValue();
+                
+                if (tableInfo.fullDeclaration.equals(mainTable)) {
+                    continue;
+                }
+                
+                if (outerJoinTables.contains(alias)) {
+                    result.append(" LEFT JOIN ").append(tableInfo.fullDeclaration);
+                    List<String> joinConds = leftJoinConditions.get(alias);
+                    if (joinConds != null && !joinConds.isEmpty()) {
+                        result.append(" ON ").append(String.join(" AND ", joinConds));
+                    }
+                } else {
+                    result.append(", ").append(tableInfo.fullDeclaration);
+                }
+            }
+            
+            // WHERE
+            if (!normalConditions.isEmpty()) {
+                result.append(" WHERE ").append(String.join(" AND ", normalConditions));
+            }
+            
+            // Reste (GROUP BY, ORDER BY, etc.)
+            result.append(afterWhere);
+            
+            return result.toString();
+            
+        } catch (Exception e) {
             return sql.replaceAll("\\s*\\(\\s*\\+\\s*\\)", "");
         }
+    }
+
+    // Classe pour stocker les infos de table
+    private static class TableInfo {
+        String tableName;
+        String alias;
+        String fullDeclaration;
         
-        String selectPart = sql.substring(0, fromIdx);
-        String fromPart = sql.substring(fromIdx + 4, whereIdx).trim();
-        String wherePart = sql.substring(whereIdx + 5).trim();
-        
-        // Trouver la fin du WHERE
-        String afterWhere = "";
-        String whereConditions = wherePart;
-        
-        for (String keyword : new String[]{"GROUP BY", "ORDER BY", "UNION", "HAVING"}) {
-            int idx = wherePart.toUpperCase().indexOf(keyword);
-            if (idx != -1) {
-                whereConditions = wherePart.substring(0, idx).trim();
-                afterWhere = " " + wherePart.substring(idx);
-                break;
-            }
+        TableInfo(String tableName, String alias, String fullDeclaration) {
+            this.tableName = tableName;
+            this.alias = alias;
+            this.fullDeclaration = fullDeclaration;
         }
+    }
+
+    // Classe pour stocker les infos de jointure externe
+    private static class OuterJoinInfo {
+        String outerTable;
+        String joinCondition;
         
-        // Parser les tables avec leurs alias
-        Map<String, TableInfo> tables = parseTablesFromClause(fromPart);
+        OuterJoinInfo(String outerTable, String joinCondition) {
+            this.outerTable = outerTable;
+            this.joinCondition = joinCondition;
+        }
+    }
+
+    // Parser les tables de la clause FROM
+    private static Map<String, TableInfo> parseTablesFromClause(String fromPart) {
+        Map<String, TableInfo> tables = new LinkedHashMap<>();
         
-        // Parser les conditions WHERE
-        List<String> conditions = splitWhereConditions(whereConditions);
-        Map<String, List<String>> leftJoinConditions = new LinkedHashMap<>();
-        List<String> normalConditions = new ArrayList<>();
-        Set<String> outerJoinTables = new HashSet<>();
-        
-        for (String condition : conditions) {
-            OuterJoinInfo joinInfo = extractOuterJoinInfo(condition);
+        for (String table : fromPart.split(",")) {
+            table = table.trim();
+            if (table.isEmpty()) continue;
             
-            if (joinInfo != null) {
-                outerJoinTables.add(joinInfo.outerTable);
-                leftJoinConditions.computeIfAbsent(joinInfo.outerTable, k -> new ArrayList<>())
-                    .add(joinInfo.joinCondition);
-            } else {
-                normalConditions.add(condition.replaceAll("\\s*\\(\\s*\\+\\s*\\)", ""));
-            }
-        }
-        
-        // Reconstruire la requête
-        StringBuilder result = new StringBuilder(selectPart);
-        result.append("FROM ");
-        
-        // Trouver la table principale
-        String mainTable = findMainTable(tables, outerJoinTables);
-        if (mainTable != null) {
-            result.append(mainTable);
-        }
-        
-        // Ajouter LEFT JOIN pour les tables outer join
-        for (Map.Entry<String, TableInfo> entry : tables.entrySet()) {
-            String alias = entry.getKey();
-            TableInfo tableInfo = entry.getValue();
+            String[] parts = table.split("\\s+");
+            String tableName = parts[0];
+            String alias = parts.length > 1 ? parts[parts.length - 1] : tableName;
             
-            if (tableInfo.fullDeclaration.equals(mainTable)) {
+            tables.put(alias.toLowerCase(), new TableInfo(tableName, alias, table));
+        }
+        
+        return tables;
+    }
+
+    // Diviser les conditions WHERE
+    private static List<String> splitWhereConditions(String where) {
+        List<String> conditions = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        int parenLevel = 0;
+        boolean inString = false;
+        
+        for (int i = 0; i < where.length(); i++) {
+            char c = where.charAt(i);
+            
+            if (c == '\'') {
+                inString = !inString;
+                current.append(c);
                 continue;
             }
             
-            if (outerJoinTables.contains(alias)) {
-                result.append(" LEFT JOIN ").append(tableInfo.fullDeclaration);
-                List<String> joinConds = leftJoinConditions.get(alias);
-                if (joinConds != null && !joinConds.isEmpty()) {
-                    result.append(" ON ").append(String.join(" AND ", joinConds));
+            if (inString) {
+                current.append(c);
+                continue;
+            }
+            
+            if (c == '(') parenLevel++;
+            else if (c == ')') parenLevel--;
+            
+            if (parenLevel == 0 && i + 5 <= where.length()) {
+                String next = where.substring(i, Math.min(i + 5, where.length())).toUpperCase();
+                if (next.startsWith(" AND ")) {
+                    conditions.add(current.toString().trim());
+                    current = new StringBuilder();
+                    i += 4; // Skip " AND"
+                    continue;
                 }
-            } else {
-                result.append(", ").append(tableInfo.fullDeclaration);
+            }
+            
+            current.append(c);
+        }
+        
+        if (current.length() > 0) {
+            conditions.add(current.toString().trim());
+        }
+        
+        return conditions;
+    }
+
+    // Extraire les infos de jointure externe
+    private static OuterJoinInfo extractOuterJoinInfo(String condition) {
+        // Pattern: table1.col = table2.col (+)
+        Pattern p1 = Pattern.compile("(\\w+)\\.(\\w+)\\s*=\\s*(\\w+)\\.(\\w+)\\s*\\(\\s*\\+\\s*\\)", 
+                                    Pattern.CASE_INSENSITIVE);
+        Matcher m1 = p1.matcher(condition);
+        
+        if (m1.find()) {
+            String leftTable = m1.group(1).toLowerCase();
+            String leftCol = m1.group(2).toLowerCase();
+            String rightTable = m1.group(3).toLowerCase();
+            String rightCol = m1.group(4).toLowerCase();
+            
+            return new OuterJoinInfo(rightTable, 
+                leftTable + "." + leftCol + " = " + rightTable + "." + rightCol);
+        }
+        
+        // Pattern: table1.col (+) = table2.col
+        Pattern p2 = Pattern.compile("(\\w+)\\.(\\w+)\\s*\\(\\s*\\+\\s*\\)\\s*=\\s*(\\w+)\\.(\\w+)", 
+                                    Pattern.CASE_INSENSITIVE);
+        Matcher m2 = p2.matcher(condition);
+        
+        if (m2.find()) {
+            String leftTable = m2.group(1).toLowerCase();
+            String leftCol = m2.group(2).toLowerCase();
+            String rightTable = m2.group(3).toLowerCase();
+            String rightCol = m2.group(4).toLowerCase();
+            
+            return new OuterJoinInfo(leftTable, 
+                leftTable + "." + leftCol + " = " + rightTable + "." + rightCol);
+        }
+        
+        return null;
+    }
+
+    // Trouver la table principale
+    private static String findMainTable(Map<String, TableInfo> tables, Set<String> outerJoinTables) {
+        for (Map.Entry<String, TableInfo> entry : tables.entrySet()) {
+            if (!outerJoinTables.contains(entry.getKey())) {
+                return entry.getValue().fullDeclaration;
             }
         }
         
-        // WHERE
-        if (!normalConditions.isEmpty()) {
-            result.append(" WHERE ").append(String.join(" AND ", normalConditions));
+        if (!tables.isEmpty()) {
+            return tables.values().iterator().next().fullDeclaration;
         }
         
-        // Reste (GROUP BY, ORDER BY, etc.)
-        result.append(afterWhere);
-        
-        return result.toString();
-        
-    } catch (Exception e) {
-        return sql.replaceAll("\\s*\\(\\s*\\+\\s*\\)", "");
+        return null;
     }
-}
-
-// Classe pour stocker les infos de table
-private static class TableInfo {
-    String tableName;
-    String alias;
-    String fullDeclaration;
-    
-    TableInfo(String tableName, String alias, String fullDeclaration) {
-        this.tableName = tableName;
-        this.alias = alias;
-        this.fullDeclaration = fullDeclaration;
-    }
-}
-
-// Classe pour stocker les infos de jointure externe
-private static class OuterJoinInfo {
-    String outerTable;
-    String joinCondition;
-    
-    OuterJoinInfo(String outerTable, String joinCondition) {
-        this.outerTable = outerTable;
-        this.joinCondition = joinCondition;
-    }
-}
-
-// Parser les tables de la clause FROM
-private static Map<String, TableInfo> parseTablesFromClause(String fromPart) {
-    Map<String, TableInfo> tables = new LinkedHashMap<>();
-    
-    for (String table : fromPart.split(",")) {
-        table = table.trim();
-        if (table.isEmpty()) continue;
-        
-        String[] parts = table.split("\\s+");
-        String tableName = parts[0];
-        String alias = parts.length > 1 ? parts[parts.length - 1] : tableName;
-        
-        tables.put(alias.toLowerCase(), new TableInfo(tableName, alias, table));
-    }
-    
-    return tables;
-}
-
-// Diviser les conditions WHERE
-private static List<String> splitWhereConditions(String where) {
-    List<String> conditions = new ArrayList<>();
-    StringBuilder current = new StringBuilder();
-    int parenLevel = 0;
-    boolean inString = false;
-    
-    for (int i = 0; i < where.length(); i++) {
-        char c = where.charAt(i);
-        
-        if (c == '\'') {
-            inString = !inString;
-            current.append(c);
-            continue;
-        }
-        
-        if (inString) {
-            current.append(c);
-            continue;
-        }
-        
-        if (c == '(') parenLevel++;
-        else if (c == ')') parenLevel--;
-        
-        if (parenLevel == 0 && i + 5 <= where.length()) {
-            String next = where.substring(i, Math.min(i + 5, where.length())).toUpperCase();
-            if (next.startsWith(" AND ")) {
-                conditions.add(current.toString().trim());
-                current = new StringBuilder();
-                i += 4; // Skip " AND"
-                continue;
-            }
-        }
-        
-        current.append(c);
-    }
-    
-    if (current.length() > 0) {
-        conditions.add(current.toString().trim());
-    }
-    
-    return conditions;
-}
-
-// Extraire les infos de jointure externe
-private static OuterJoinInfo extractOuterJoinInfo(String condition) {
-    // Pattern: table1.col = table2.col (+)
-    Pattern p1 = Pattern.compile("(\\w+)\\.(\\w+)\\s*=\\s*(\\w+)\\.(\\w+)\\s*\\(\\s*\\+\\s*\\)", 
-                                Pattern.CASE_INSENSITIVE);
-    Matcher m1 = p1.matcher(condition);
-    
-    if (m1.find()) {
-        String leftTable = m1.group(1).toLowerCase();
-        String leftCol = m1.group(2).toLowerCase();
-        String rightTable = m1.group(3).toLowerCase();
-        String rightCol = m1.group(4).toLowerCase();
-        
-        return new OuterJoinInfo(rightTable, 
-            leftTable + "." + leftCol + " = " + rightTable + "." + rightCol);
-    }
-    
-    // Pattern: table1.col (+) = table2.col
-    Pattern p2 = Pattern.compile("(\\w+)\\.(\\w+)\\s*\\(\\s*\\+\\s*\\)\\s*=\\s*(\\w+)\\.(\\w+)", 
-                                Pattern.CASE_INSENSITIVE);
-    Matcher m2 = p2.matcher(condition);
-    
-    if (m2.find()) {
-        String leftTable = m2.group(1).toLowerCase();
-        String leftCol = m2.group(2).toLowerCase();
-        String rightTable = m2.group(3).toLowerCase();
-        String rightCol = m2.group(4).toLowerCase();
-        
-        return new OuterJoinInfo(leftTable, 
-            leftTable + "." + leftCol + " = " + rightTable + "." + rightCol);
-    }
-    
-    return null;
-}
-
-// Trouver la table principale
-private static String findMainTable(Map<String, TableInfo> tables, Set<String> outerJoinTables) {
-    for (Map.Entry<String, TableInfo> entry : tables.entrySet()) {
-        if (!outerJoinTables.contains(entry.getKey())) {
-            return entry.getValue().fullDeclaration;
-        }
-    }
-    
-    if (!tables.isEmpty()) {
-        return tables.values().iterator().next().fullDeclaration;
-    }
-    
-    return null;
-}
 
     // ============================================================
     // MIGRATION FONCTIONS - CORRIGÉE
@@ -1879,7 +1534,7 @@ private static String findMainTable(Map<String, TableInfo> tables, Set<String> o
                 stats.functionsFailed++;
                 String errorMsg = e.getMessage();
                 stats.failedFunctions.put(funcName, errorMsg);
-                String errorType = classifyError(errorMsg);
+                String errorType = MigrationStats.classifyError(errorMsg);
                 stats.addErrorSummary(errorType, funcName);
                 stats.addError("❌ FONCTION " + funcName + ": " + errorMsg);
             }
@@ -2003,7 +1658,7 @@ private static String findMainTable(Map<String, TableInfo> tables, Set<String> o
                         } catch (Exception e) {
                             stats.triggersFailed++;
                             stats.failedTriggers.put(trigName, "Échec création trigger basique: " + e.getMessage());
-                            stats.addErrorSummary(classifyError(e.getMessage()), trigName);
+                            stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), trigName);
                             stats.addError("❌ TRIGGER " + trigName + ": " + e.getMessage());
                         }
                     } else {
@@ -2023,7 +1678,7 @@ private static String findMainTable(Map<String, TableInfo> tables, Set<String> o
                         } catch (Exception e) {
                             stats.triggersFailed++;
                             stats.failedTriggers.put(trigName, "Échec création trigger: " + e.getMessage());
-                            stats.addErrorSummary(classifyError(e.getMessage()), trigName);
+                            stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), trigName);
                             stats.addError("❌ TRIGGER " + trigName + ": " + e.getMessage());
                         }
                     } else {
@@ -2036,7 +1691,7 @@ private static String findMainTable(Map<String, TableInfo> tables, Set<String> o
             } catch (Exception e) {
                 stats.triggersFailed++;
                 stats.failedTriggers.put(trigName, e.getMessage());
-                stats.addErrorSummary(classifyError(e.getMessage()), trigName);
+                stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), trigName);
                 stats.addError("❌ TRIGGER " + trigName + ": " + e.getMessage());
             }
         }

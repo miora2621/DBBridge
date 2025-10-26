@@ -11,186 +11,6 @@ import stage.bici.DBBridge.Model.PostgreSQL;
 public class PostgresService {
     
     // ============================================================
-    // STATISTIQUES DE MIGRATION
-    // ============================================================
-    
-    private static class MigrationStats {
-        int tablesTotal, tablesSuccess, tablesFailed;
-        int dataTotal, dataSuccess, dataFailed;
-        int sequencesTotal, sequencesSuccess, sequencesFailed;
-        int functionsTotal, functionsSuccess, functionsFailed;
-        int viewsTotal, viewsSuccess, viewsFailed;
-        int pkTotal, pkSuccess;
-        int fkTotal, fkSuccess, fkFailed;
-        int uniqueTotal, uniqueSuccess, uniqueFailed;
-        int indexTotal, indexSuccess, indexFailed;
-        int triggersTotal, triggersSuccess, triggersFailed;
-        
-        List<String> failedTables = new ArrayList<>();
-        List<String> failedData = new ArrayList<>();
-        Map<String, String> failedSequences = new HashMap<>();
-        Map<String, String> failedFunctions = new HashMap<>();
-        Map<String, String> failedViews = new HashMap<>();
-        Map<String, String> failedIndexes = new HashMap<>();
-        Map<String, String> failedFKs = new HashMap<>();
-        Map<String, String> failedUniques = new HashMap<>();
-        Map<String, String> failedTriggers = new HashMap<>();
-        
-        // Résumé des logs par type d'erreur
-        Map<String, Integer> errorsSummary = new LinkedHashMap<>();
-        Map<String, List<String>> errorsExamples = new LinkedHashMap<>();
-        
-        List<String> warnings = new ArrayList<>();
-        int dataRowsFailed = 0;
-        int nullBytesRemoved = 0;
-        
-        // Stockage temporaire des erreurs
-        List<String> allErrors = new ArrayList<>();
-
-        void addError(String error) {
-            allErrors.add(error);
-        }
-
-        void addErrorSummary(String errorType, String objectName) {
-            errorsSummary.put(errorType, errorsSummary.getOrDefault(errorType, 0) + 1);
-            errorsExamples.computeIfAbsent(errorType, k -> new ArrayList<>());
-            List<String> examples = errorsExamples.get(errorType);
-            if (examples.size() < 5) {
-                examples.add(objectName);
-            }
-        }
-
-        void printDetailed() {
-            System.out.println("\n" + "=".repeat(80));
-            System.out.println("=== RÉSUMÉ DÉTAILLÉ DE LA MIGRATION POSTGRESQL → ORACLE ===");
-            System.out.println("=".repeat(80));
-            
-            printCategory("TABLES", tablesSuccess, tablesTotal, tablesFailed, failedTables);
-            printCategory("DONNÉES", dataSuccess, dataTotal, dataFailed, failedData);
-            if (dataRowsFailed > 0) {
-                System.out.println("   ⚠️  Lignes individuelles échouées: " + dataRowsFailed);
-            }
-            if (nullBytesRemoved > 0) {
-                System.out.println("   🔧 NULL bytes nettoyés: " + nullBytesRemoved);
-            }
-            printCategoryWithErrors("SÉQUENCES", sequencesSuccess, sequencesTotal, sequencesFailed, failedSequences);
-            printCategoryWithErrors("INDEX", indexSuccess, indexTotal, indexFailed, failedIndexes);
-            printCategory("CONTRAINTES PK", pkSuccess, pkTotal, 0, Collections.emptyList());
-            printCategoryWithErrors("CONTRAINTES FK", fkSuccess, fkTotal, fkFailed, failedFKs);
-            printCategoryWithErrors("CONTRAINTES UNIQUE", uniqueSuccess, uniqueTotal, uniqueFailed, failedUniques);
-            printCategoryWithErrors("FONCTIONS", functionsSuccess, functionsTotal, functionsFailed, failedFunctions);
-            printCategoryWithErrors("TRIGGERS", triggersSuccess, triggersTotal, triggersFailed, failedTriggers);
-            printCategoryWithErrors("VUES", viewsSuccess, viewsTotal, viewsFailed, failedViews);
-            
-            if (!warnings.isEmpty()) {
-                System.out.println("\n⚠️  AVERTISSEMENTS:");
-                warnings.forEach(w -> System.out.println("   " + w));
-            }
-            
-            // RÉSUMÉ DES LOGS GROUPÉ PAR TYPE D'ERREUR
-            if (!errorsSummary.isEmpty()) {
-                System.out.println("\n" + "=".repeat(80));
-                System.out.println("=== RÉSUMÉ DES ERREURS PAR TYPE ===");
-                System.out.println("=".repeat(80));
-                errorsSummary.forEach((errorType, count) -> {
-                    System.out.println(String.format("🔴 %-40s : %d occurrence(s)", errorType, count));
-                    List<String> examples = errorsExamples.get(errorType);
-                    if (examples != null && !examples.isEmpty()) {
-                        System.out.println("   Exemples: " + String.join(", ", examples.subList(0, Math.min(3, examples.size()))));
-                    }
-                });
-                System.out.println("=".repeat(80));
-            }
-            
-            System.out.println("\n" + "=".repeat(80));
-            
-            int totalObjets = tablesTotal + dataTotal + sequencesTotal + functionsTotal + 
-                            viewsTotal + pkTotal + fkTotal + uniqueTotal + indexTotal + triggersTotal;
-            int totalSuccess = tablesSuccess + dataSuccess + sequencesSuccess + functionsSuccess + 
-                             viewsSuccess + pkSuccess + fkSuccess + uniqueSuccess + indexSuccess + triggersSuccess;
-            int totalFailed = tablesFailed + dataFailed + sequencesFailed + functionsFailed + 
-                            viewsFailed + fkFailed + uniqueFailed + indexFailed + triggersFailed;
-            
-            double globalScore = totalObjets > 0 ? (totalSuccess * 100.0 / totalObjets) : 0;
-            
-            System.out.println(String.format("🎯 SCORE GLOBAL : %.1f%% (%d/%d objets migrés avec succès, %d échecs)", 
-                globalScore, totalSuccess, totalObjets, totalFailed));
-            System.out.println("=".repeat(80) + "\n");
-        }
-        
-        private void printCategory(String name, int success, int total, int failed, List<String> failedList) {
-            double pct = total > 0 ? (success * 100.0 / total) : 0;
-            System.out.println(String.format("📊 %-20s : %d/%d migrés (%.1f%%) - %d échecs", 
-                name, success, total, pct, failed));
-            if (!failedList.isEmpty() && failedList.size() <= 5) {
-                System.out.println("   ❌ Échecs: " + String.join(", ", failedList));
-            } else if (failedList.size() > 5) {
-                System.out.println("   ❌ " + failed + " échecs (voir résumé ci-dessus)");
-            }
-        }
-        
-        private void printCategoryWithErrors(String name, int success, int total, int failed, Map<String, String> errors) {
-            double pct = total > 0 ? (success * 100.0 / total) : 0;
-            System.out.println(String.format("📊 %-20s : %d/%d migrés (%.1f%%) - %d échecs", 
-                name, success, total, pct, failed));
-            if (!errors.isEmpty() && errors.size() <= 3) {
-                errors.forEach((k, v) -> {
-                    String msg = v.length() > 80 ? v.substring(0, 80) + "..." : v;
-                    System.out.println("   ❌ " + k + ": " + msg);
-                });
-            } else if (errors.size() > 3) {
-                System.out.println("   ❌ " + failed + " échecs (voir résumé ci-dessus)");
-            }
-        }
-
-        void printAllErrorsDetailed() {
-            if (!allErrors.isEmpty()) {
-                System.out.println("\n" + "=".repeat(100));
-                System.out.println("=== TOUTES LES ERREURS DÉTAILLÉES ===");
-                System.out.println("=".repeat(100));
-                
-                for (String error : allErrors) {
-                    System.out.println(error);
-                    System.out.println("-".repeat(100));
-                }
-            }
-            
-            // Afficher aussi les erreurs par catégorie
-            printAllErrorsForCategory("FONCTIONS", failedFunctions);
-            printAllErrorsForCategory("VUES", failedViews);
-            printAllErrorsForCategoryList("TABLES", failedTables);
-            printAllErrorsForCategory("SÉQUENCES", failedSequences);
-            printAllErrorsForCategory("INDEX", failedIndexes);
-            printAllErrorsForCategory("CONTRAINTES FK", failedFKs);
-            printAllErrorsForCategory("CONTRAINTES UNIQUE", failedUniques);
-            printAllErrorsForCategory("TRIGGERS", failedTriggers);
-            printAllErrorsForCategoryList("DONNÉES (Tables)", failedData);
-        }
-
-        private void printAllErrorsForCategory(String category, Map<String, String> errors) {
-            if (!errors.isEmpty()) {
-                System.out.println("\n--- " + category + " (" + errors.size() + " erreurs) ---");
-                errors.forEach((name, error) -> {
-                    System.out.println("🔴 " + name + ":");
-                    System.out.println("   Message: " + (error.length() > 200 ? error.substring(0, 200) + "..." : error));
-                    System.out.println("   Type: " + classifyError(error));
-                    System.out.println();
-                });
-            }
-        }
-        
-        private void printAllErrorsForCategoryList(String category, List<String> errors) {
-            if (!errors.isEmpty()) {
-                System.out.println("\n--- " + category + " (" + errors.size() + " erreurs) ---");
-                for (String error : errors) {
-                    System.out.println("🔴 " + error);
-                }
-                System.out.println();
-            }
-        }
-    }
-    
-    // ============================================================
     // MOTS-CLÉS ORACLE RÉSERVÉS
     // ============================================================
     
@@ -234,7 +54,7 @@ public class PostgresService {
         return upper;
     }
     
-    private static Object cleanNullBytes(Object value, MigrationStats stats) {
+    private static Object cleanNullBytes(Object value, PostgresMigrationStats stats) {
         if (value instanceof String) {
             String str = (String) value;
             if (str.indexOf('\0') >= 0) {
@@ -243,43 +63,6 @@ public class PostgresService {
             }
         }
         return value;
-    }
-    
-    private static String classifyError(String errorMessage) {
-        if (errorMessage == null) return "Erreur inconnue";
-        
-        errorMessage = errorMessage.toLowerCase();
-        if (errorMessage.contains("relation") && errorMessage.contains("n'existe pas")) {
-            return "Relation inexistante (vue dépendante)";
-        } else if (errorMessage.contains("erreur de syntaxe") || errorMessage.contains("syntax error")) {
-            return "Erreur de syntaxe SQL";
-        } else if (errorMessage.contains("fonction") && errorMessage.contains("n'existe pas")) {
-            return "Fonction inexistante";
-        } else if (errorMessage.contains("colonne") && errorMessage.contains("plus d'une fois")) {
-            return "Colonne dupliquée";
-        } else if (errorMessage.contains("colonne") && errorMessage.contains("n'existe pas")) {
-            return "Colonne inexistante";
-        } else if (errorMessage.contains("type") && errorMessage.contains("n'existe pas")) {
-            return "Type inexistant";
-        } else if (errorMessage.contains("alias")) {
-            return "Alias manquant dans sous-requête";
-        } else if (errorMessage.contains("invalid") || errorMessage.contains("invalide")) {
-            return "Objet invalide";
-        } else if (errorMessage.contains("source vide")) {
-            return "Source code inaccessible";
-        } else if (errorMessage.contains("conversion non supportée")) {
-            return "Syntaxe complexe non supportée";
-        } else if (errorMessage.contains("sous-requête du from doit avoir un alias")) {
-            return "Alias manquant dans sous-requête";
-        } else if (errorMessage.contains("identifier is too long")) {
-            return "Nom trop long pour Oracle";
-        } else if (errorMessage.contains("table or view does not exist")) {
-            return "Table ou vue inexistante";
-        } else if (errorMessage.contains("name already used")) {
-            return "Nom de contrainte dupliqué";
-        } else {
-            return "Autre erreur";
-        }
     }
 
     // ============================================================
@@ -399,9 +182,9 @@ public class PostgresService {
     // VALIDATION OBJETS POSTGRESQL
     // ============================================================
 
-    private static DatabaseObjects validatePostgresObjects(Connection pg) throws SQLException {
+    private static PostgresDatabaseObjects validatePostgresObjects(Connection pg) throws SQLException {
         System.out.println("\n🔍 VALIDATION DES OBJETS POSTGRESQL...");
-        DatabaseObjects db = new DatabaseObjects();
+        PostgresDatabaseObjects db = new PostgresDatabaseObjects();
         
         // Tables
         try (Statement st = pg.createStatement();
@@ -464,7 +247,7 @@ public class PostgresService {
     // ANALYSE DES DÉPENDANCES DES VUES
     // ============================================================
 
-    private static void analyzeViewDependencies(Connection pg, DatabaseObjects db, MigrationStats stats) {
+    private static void analyzeViewDependencies(Connection pg, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         System.out.println("\n🔍 ANALYSE DES DÉPENDANCES DES VUES...");
         
         Map<String, Set<String>> viewDependencies = new HashMap<>();
@@ -493,7 +276,7 @@ public class PostgresService {
         db.missingDependencies = missingDependencies;
     }
 
-    private static Set<String> findViewDependencies(String viewDef, DatabaseObjects db) {
+    private static Set<String> findViewDependencies(String viewDef, PostgresDatabaseObjects db) {
         Set<String> dependencies = new HashSet<>();
         String upperDef = viewDef.toUpperCase();
         
@@ -517,7 +300,7 @@ public class PostgresService {
     // TRI TOPOLOGIQUE DES VUES
     // ============================================================
 
-    private static List<String> sortViewsByDependencies(DatabaseObjects db) {
+    private static List<String> sortViewsByDependencies(PostgresDatabaseObjects db) {
         System.out.println("\n🔄 TRI TOPOLOGIQUE DES VUES...");
         
         Map<String, Set<String>> dependencies = new HashMap<>();
@@ -570,7 +353,7 @@ public class PostgresService {
     // 1. MIGRATION DES SÉQUENCES
     // ============================================================
     
-    private static void migrateSequences(Connection pg, Connection ora, DatabaseObjects db, MigrationStats stats) {
+    private static void migrateSequences(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         System.out.println("\n🔢 MIGRATION DES SÉQUENCES...");
         stats.sequencesTotal = db.validSequences.size();
         
@@ -610,7 +393,7 @@ public class PostgresService {
             } catch (Exception e) {
                 stats.sequencesFailed++;
                 stats.failedSequences.put(seq, e.getMessage());
-                stats.addErrorSummary(classifyError(e.getMessage()), seq);
+                stats.addErrorSummary(PostgresMigrationStats.classifyError(e.getMessage()), seq);
                 stats.addError("❌ SÉQUENCE " + seq + ": " + e.getMessage());
             }
         }
@@ -740,7 +523,7 @@ public class PostgresService {
         return sb.toString();
     }
 
-    private static void migrateTables(PostgreSQL postgres, Oracle oracle, DatabaseObjects db, MigrationStats stats) throws SQLException {
+    private static void migrateTables(PostgreSQL postgres, Oracle oracle, PostgresDatabaseObjects db, PostgresMigrationStats stats) throws SQLException {
         System.out.println("\n🔨 MIGRATION DES TABLES...");
         stats.tablesTotal = db.validTables.size();
         stats.pkTotal = db.validTables.size();
@@ -769,7 +552,7 @@ public class PostgresService {
                     } catch (Exception e2) {
                         stats.tablesFailed++;
                         stats.failedTables.add(table);
-                        stats.addErrorSummary(classifyError(e.getMessage()), table);
+                        stats.addErrorSummary(PostgresMigrationStats.classifyError(e.getMessage()), table);
                         stats.addError("❌ TABLE " + table + ": " + e.getMessage());
                     }
                 }
@@ -805,7 +588,7 @@ public class PostgresService {
     // 3. MIGRATION DES DONNÉES
     // ============================================================
 
-    private static void migrateData(PostgreSQL postgres, Oracle oracle, DatabaseObjects db, MigrationStats stats) throws SQLException {
+    private static void migrateData(PostgreSQL postgres, Oracle oracle, PostgresDatabaseObjects db, PostgresMigrationStats stats) throws SQLException {
         System.out.println("\n📦 MIGRATION DES DONNÉES...");
         stats.dataTotal = db.validTables.size();
         
@@ -819,7 +602,7 @@ public class PostgresService {
                 } catch (Exception e) {
                     stats.dataFailed++;
                     stats.failedData.add(table);
-                    stats.addErrorSummary(classifyError(e.getMessage()), table);
+                    stats.addErrorSummary(PostgresMigrationStats.classifyError(e.getMessage()), table);
                     stats.addError("❌ DONNÉES " + table + ": " + e.getMessage());
                 }
             }
@@ -827,7 +610,7 @@ public class PostgresService {
     }
 
     private static void insertDataWithConnection(PostgreSQL postgreSQL, Connection oracleConn, 
-                                               String tableNamePg, String tableNameOracle, MigrationStats stats) throws SQLException {
+                                               String tableNamePg, String tableNameOracle, PostgresMigrationStats stats) throws SQLException {
         try (Connection pgConn = PostgresConnexion(postgreSQL);
              Statement st = pgConn.createStatement();
              ResultSet countRs = st.executeQuery("SELECT COUNT(*) FROM \"" + tableNamePg + "\"")) {
@@ -936,7 +719,7 @@ public class PostgresService {
     // 4. MIGRATION DES INDEX
     // ============================================================
     
-    private static void migrateIndexes(Connection pg, Connection ora, DatabaseObjects db, MigrationStats stats) {
+    private static void migrateIndexes(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         System.out.println("\n🔍 MIGRATION DES INDEX...");
         
         for (String table : db.validTables) {
@@ -962,7 +745,7 @@ public class PostgresService {
                         } catch (Exception e) {
                             stats.indexFailed++;
                             stats.failedIndexes.put(idx, e.getMessage());
-                            stats.addErrorSummary(classifyError(e.getMessage()), idx);
+                            stats.addErrorSummary(PostgresMigrationStats.classifyError(e.getMessage()), idx);
                             stats.addError("❌ INDEX " + idx + ": " + e.getMessage());
                         }
                     }
@@ -1004,7 +787,7 @@ public class PostgresService {
     // 5. MIGRATION DES CONTRAINTES FK ET UNIQUE
     // ============================================================
     
-    private static void migrateConstraints(Connection pg, Connection ora, DatabaseObjects db, MigrationStats stats) {
+    private static void migrateConstraints(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         System.out.println("\n🔗 MIGRATION DES CONTRAINTES...");
         
         // FOREIGN KEYS
@@ -1059,7 +842,7 @@ public class PostgresService {
                 } catch (Exception e) {
                     stats.fkFailed++;
                     stats.failedFKs.put(fkName, e.getMessage());
-                    stats.addErrorSummary(classifyError(e.getMessage()), fkName);
+                    stats.addErrorSummary(PostgresMigrationStats.classifyError(e.getMessage()), fkName);
                     stats.addError("❌ FK " + fkName + ": " + e.getMessage());
                 }
             }
@@ -1101,7 +884,7 @@ public class PostgresService {
                 } catch (Exception e) {
                     stats.uniqueFailed++;
                     stats.failedUniques.put(ukName, e.getMessage());
-                    stats.addErrorSummary(classifyError(e.getMessage()), ukName);
+                    stats.addErrorSummary(PostgresMigrationStats.classifyError(e.getMessage()), ukName);
                     stats.addError("❌ UNIQUE " + ukName + ": " + e.getMessage());
                 }
             }
@@ -1126,7 +909,7 @@ public class PostgresService {
     // 6. MIGRATION DES FONCTIONS
     // ============================================================
     
-    private static void migrateFunctions(Connection pg, Connection ora, DatabaseObjects db, MigrationStats stats) {
+    private static void migrateFunctions(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         System.out.println("\n🧪 MIGRATION DES FONCTIONS...");
         stats.functionsTotal = db.validFunctions.size();
         
@@ -1167,7 +950,7 @@ public class PostgresService {
             } catch (Exception e) {
                 stats.functionsFailed++;
                 stats.failedFunctions.put(func, e.getMessage());
-                stats.addErrorSummary(classifyError(e.getMessage()), func);
+                stats.addErrorSummary(PostgresMigrationStats.classifyError(e.getMessage()), func);
                 stats.addError("❌ FONCTION " + func + ": " + e.getMessage());
             }
         }
@@ -1238,7 +1021,7 @@ public class PostgresService {
     // 7. MIGRATION DES TRIGGERS
     // ============================================================
     
-    private static void migrateTriggers(Connection pg, Connection ora, DatabaseObjects db, MigrationStats stats) {
+    private static void migrateTriggers(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         System.out.println("\n⚡ MIGRATION DES TRIGGERS...");
         stats.triggersTotal = db.validTriggers.size();
         
@@ -1284,7 +1067,7 @@ public class PostgresService {
             } catch (Exception e) {
                 stats.triggersFailed++;
                 stats.failedTriggers.put(trg, e.getMessage());
-                stats.addErrorSummary(classifyError(e.getMessage()), trg);
+                stats.addErrorSummary(PostgresMigrationStats.classifyError(e.getMessage()), trg);
                 stats.addError("❌ TRIGGER " + trg + ": " + e.getMessage());
             }
         }
@@ -1328,7 +1111,7 @@ public class PostgresService {
     // 8. MIGRATION DES VUES - VERSION CORRIGÉE SANS SECOURS
     // ============================================================
     
-    private static void migrateViews(Connection pg, Connection ora, DatabaseObjects db, MigrationStats stats) {
+    private static void migrateViews(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         System.out.println("\n👁️  MIGRATION DES VUES...");
         stats.viewsTotal = db.validViews.size();
         
@@ -1374,7 +1157,7 @@ public class PostgresService {
                         // DERNIÈRE PASSE : Échec définitif
                         stats.viewsFailed++;
                         stats.failedViews.put(view, e.getMessage());
-                        stats.addErrorSummary(classifyError(e.getMessage()), view);
+                        stats.addErrorSummary(PostgresMigrationStats.classifyError(e.getMessage()), view);
                         migrated.add(view);
                         failedThisPass++;
                         System.out.println("❌ Vue " + view + ": " + e.getMessage());
@@ -1487,14 +1270,14 @@ public class PostgresService {
         System.out.println("=".repeat(80));
         
         long start = System.currentTimeMillis();
-        MigrationStats stats = new MigrationStats();
+        PostgresMigrationStats stats = new PostgresMigrationStats();
 
         try (Connection pgConn = PostgresConnexion(postgres);
              Connection oraConn = OracleService.OracleConnexion(oracle)) {
             
             System.out.println("✅ Connexions établies");
             
-            DatabaseObjects db = validatePostgresObjects(pgConn);
+            PostgresDatabaseObjects db = validatePostgresObjects(pgConn);
             analyzeViewDependencies(pgConn, db, stats);
             
             // MIGRATION AVEC SECOURS
@@ -1513,7 +1296,7 @@ public class PostgresService {
     }
 
     private static void migrateWithFallback(Connection pg, Connection ora, PostgreSQL postgres, Oracle oracle, 
-                                          DatabaseObjects db, MigrationStats stats) {
+                                          PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         // 1. Séquences
         try { migrateSequences(pg, ora, db, stats); } catch (Exception e) {
             stats.addError("❌ Séquences: " + e.getMessage());
@@ -1556,22 +1339,6 @@ public class PostgresService {
     }
 
     // ============================================================
-    // CLASSES INTERNES
-    // ============================================================
-    
-    private static class DatabaseObjects {
-        String owner;
-        Set<String> validTables = new HashSet<>();
-        Set<String> validSequences = new HashSet<>();
-        Set<String> validViews = new HashSet<>();
-        Set<String> validFunctions = new HashSet<>();
-        Set<String> validTriggers = new HashSet<>();
-        Map<String, String> viewDefinitions = new HashMap<>();
-        Map<String, Set<String>> viewDependencies = new HashMap<>();
-        Map<String, Set<String>> missingDependencies = new HashMap<>();
-    }
-
-    // ============================================================
     // MÉTHODES COMPATIBILITÉ
     // ============================================================
 
@@ -1584,7 +1351,7 @@ public class PostgresService {
 
     public static void insertDataIntoOracle(PostgreSQL postgreSQL, Oracle oracle, String tableName) throws SQLException {
         try (Connection oracleConn = OracleService.OracleConnexion(oracle)) {
-            MigrationStats dummyStats = new MigrationStats();
+            PostgresMigrationStats dummyStats = new PostgresMigrationStats();
             insertDataWithConnection(postgreSQL, oracleConn, tableName, tableName, dummyStats);
         }
     }
