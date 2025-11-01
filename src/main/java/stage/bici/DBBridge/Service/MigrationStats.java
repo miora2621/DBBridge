@@ -2,6 +2,8 @@ package stage.bici.DBBridge.Service;
 
 import java.util.*;
 import java.util.regex.*;
+import java.util.stream.Collectors;
+import stage.bici.DBBridge.Model.*;
 
 public class MigrationStats {
     // ============================================================
@@ -41,6 +43,34 @@ public class MigrationStats {
     
     // Stockage temporaire des erreurs
     public List<String> allErrors = new ArrayList<>();
+
+    public List<MigrationScript> getScriptsByType(MigrationScript.ScriptType type) {
+        return migrationScripts.stream()
+            .filter(s -> s.getType() == type)
+            .collect(Collectors.toList());
+    }
+
+    public List<MigrationScript> getSuccessfulScripts() {
+        return migrationScripts.stream()
+            .filter(MigrationScript::isSuccess)
+            .collect(Collectors.toList());
+    }
+
+    public List<MigrationScript> getFailedScripts() {
+        return migrationScripts.stream()
+            .filter(s -> !s.isSuccess())
+            .collect(Collectors.toList());
+    }
+
+    private List<MigrationScript> migrationScripts = new ArrayList<>();
+
+    public void addMigrationScript(MigrationScript script) {
+        this.migrationScripts.add(script);
+    }
+
+    public List<MigrationScript> getMigrationScripts() {
+        return migrationScripts;
+    }
 
     public void addError(String error) {
         allErrors.add(error);

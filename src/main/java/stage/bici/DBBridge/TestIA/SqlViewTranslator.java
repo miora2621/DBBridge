@@ -11,22 +11,48 @@ public class SqlViewTranslator {
 
     public static String translateOracleToPostgres(String oracleSqlView) throws IOException {
         OkHttpClient client = new OkHttpClient.Builder()
-        .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-        .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
-        .build();
+            .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+            .build();
 
-        // Requête JSON pour le modèle GPT
+        String prompt = """
+        Tu es un traducteur SQL expert.
+        Convertis **une vue Oracle** en **vue PostgreSQL fonctionnelle**, sans changer la logique.
+
+        RÈGLES :
+        - Garde même structure : SELECT, FROM, WHERE, GROUP BY, ORDER BY (pas de réorganisation).
+        - Supprime FORCE et guillemets ("SCHEMA"."TABLE" → table).
+        - NVL → COALESCE, SYSDATE → CURRENT_DATE.
+        - Oracle (+) → JOIN explicite (LEFT JOIN, INNER JOIN…).
+        - TOUTE sous-requête dans un FROM doit avoir un alias : (SELECT ...) AS sub.
+        - Ajoute COALESCE(x,0) pour les opérations arithmétiques.
+        - Si comparaison texte/int → ajoute cast (::INTEGER ou ::TEXT).
+        - Corrige les erreurs de type COALESCE entre text et integer (tout homogène).
+        - Alias uniques : pas deux identiques (renomme si besoin).
+        - Supprime ou ignore les schémas inexistants.
+        - Ne renvoie **que le SQL PostgreSQL**, sans explication ni texte.
+
+        Format final :
+        CREATE OR REPLACE VIEW nom_vue AS
+        <SQL PostgreSQL corrigé>
+
+        Vue Oracle :
+        """ + oracleSqlView;
+
+
+
         JsonObject message = new JsonObject();
         message.addProperty("role", "user");
-        message.addProperty("content", "Convertis cette vue Oracle en PostgreSQL :\n\n" + oracleSqlView + "\"Ta réponse doit contenir UNIQUEMENT la requête SQL valide, sans explication, sans texte, sans commentaire, sans Markdown.Enleve le double cote avant et apres le nom de la view , enleve aussi le nom de la table et le point avant le nom de la view a creer\"");
+        message.addProperty("content", prompt);
 
         JsonArray messages = new JsonArray();
         messages.add(message);
 
         JsonObject body = new JsonObject();
-        body.addProperty("model", "gpt-4o-mini"); // modèle rapide et économique
+        body.addProperty("model", "gpt-4o"); // Modèle plus puissant et précis
         body.add("messages", messages);
+        body.addProperty("temperature", 0.1);
 
         RequestBody requestBody = RequestBody.create(
             body.toString(),
@@ -41,59 +67,28 @@ public class SqlViewTranslator {
 
         try (Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                throw new IOException("Erreur API: " + response);
+                throw new IOException("Erreur API: " + response.code() + " - " + response.message());
             }
-            JsonObject jsonResponse = JsonParser.parseString(response.body().string()).getAsJsonObject();
-            return jsonResponse
-                    .getAsJsonArray("choices")
-                    .get(0).getAsJsonObject()
-                    .getAsJsonObject("message")
-                    .get("content").getAsString();
+
+            String responseBody = response.body().string();
+            JsonObject jsonResponse = JsonParser.parseString(responseBody).getAsJsonObject();
+
+            JsonArray choices = jsonResponse.getAsJsonArray("choices");
+            if (choices == null || choices.size() == 0) {
+                throw new IOException("Réponse vide de l'API");
+            }
+
+            JsonObject messageObj = choices.get(0).getAsJsonObject().getAsJsonObject("message");
+            String content = messageObj.get("content").getAsString();
+
+            // Nettoyage du contenu
+            content = content.replaceAll("(?s)```sql|```", "").trim();
+
+            return content;
         }
     }
 
     public static void main(String[] args) throws IOException {
-        String oracleView = "\r\n" + //
-                        "  CREATE OR REPLACE FORCE VIEW \"REFERE\".\"FACTETUSANSSEM_LIBCPL\" (\"ID\", \"DESIGNATION\", \"IDETUDIANT\", \"ECHEANCEPAIEMENT\", \"DATY\", \"ETAT\", \"NOM\", \"PRENOM\", \"MONTANT\", \"PAYE\", \"RESTE\", \"ETATLIB\", \"PROMOTION\", \"NUMERO\", \"MATIERELIB\", \"IDPROMOTION\") AS \r\n" + //
-                        "  SELECT\r\n" + //
-                        "        F.ID,\r\n" + //
-                        "        F.DESIGNATION,\r\n" + //
-                        "        F.IDETUDIANT,\r\n" + //
-                        "        F.ECHEANCEPAIEMENT,\r\n" + //
-                        "        F.DATY,\r\n" + //
-                        "        F.ETAT,\r\n" + //
-                        "        E.NOM,\r\n" + //
-                        "        E.PRENOM,\r\n" + //
-                        "        FG.MONTANT                                                                                    AS MONTANT,\r\n" + //
-                        "        CAST(NVL(S.MONTANT, 0) AS NUMBER(30, 2))                                                      AS PAYE,\r\n" + //
-                        "        CAST(NVL(FG.MONTANT, 0)-NVL(S.MONTANT, 0) AS NUMBER(30, 2))                                   AS RESTE,\r\n" + //
-                        "        CASE\r\n" + //
-                        "            WHEN F.ETAT =1 THEN\r\n" + //
-                        "                'CREE'\r\n" + //
-                        "            WHEN F.ETAT=11 THEN\r\n" + //
-                        "                'VISEE'\r\n" + //
-                        "            WHEN F.ETAT= 0 THEN\r\n" + //
-                        "                'ANNULEE'\r\n" + //
-                        "        END AS ETATLIB,\r\n" + //
-                        "        ENT.PROMOTION,\r\n" + //
-                        "        ENT.NUMERO,\r\n" + //
-                        "        FG.MATIERELIB,\r\n" + //
-                        "        ENT.IDPROMOTION\r\n" + //
-                        "\r\n" + //
-                        "    FROM\r\n" + //
-                        "        FACTSCOLAVECETU            F,\r\n" + //
-                        "        FACTSCOLAVECETUDETAIL_GRPMTT  FG,\r\n" + //
-                        "        SUMPAIEMENTFACTSCOLAVECETU S,\r\n" + //
-                        "        ETUDIANT                   E,\r\n" + //
-                        "        ENTREEUNIVLIB              ENT\r\n" + //
-                        "    WHERE\r\n" + //
-                        "        F.ID = S.IDFACTSCOLAVECETU(+)\r\n" + //
-                        "        AND F.ID=FG.IDFACTSCOLAVECETU(+)\r\n" + //
-                        "        AND F.IDETUDIANT =E.ID\r\n" + //
-                        "        AND E.ID=ENT.IDETUDIANT\r\n" + //
-                        "\r\n" + //
-                        "";
-        String postgresView = translateOracleToPostgres(oracleView);
-        System.out.println("Vue PostgreSQL :\n" + postgresView);
+      
     }
 }
