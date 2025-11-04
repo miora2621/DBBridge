@@ -13,7 +13,7 @@ import stage.bici.DBBridge.Service.*;
 
 @Controller
 public class ConnexionController {
-    
+
     @PostMapping("/Connexion")
     public String connecter(@ModelAttribute Oracle oracle, Model model , HttpSession session) {
         try {
@@ -28,7 +28,7 @@ public class ConnexionController {
             model.addAttribute("error", "Erreur de connexion : " + e.getMessage());
             return "pages/InfoConnexion";
         }
-        
+
         model.addAttribute("oracle", new Oracle());
         return "pages/InfoConnexion";
     }
@@ -47,8 +47,10 @@ public class ConnexionController {
             model.addAttribute("error", "Erreur de connexion : " + e.getMessage());
             return "pages/InfoConnexionPostgres";
         }
-        
+
         model.addAttribute("postgres", new PostgreSQL());
         return "pages/InfoConnexionPostgres";
     }
+
+
 }

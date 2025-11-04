@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="fr" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DB Bridge</title>
+    <!-- Utiliser le chemin correct pour les ressources statiques dans Spring Boot -->
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <link rel="stylesheet" th:href="@{/assets/css/app.min.css}">
+    <!-- Template CSS -->
+    <link rel="stylesheet" th:href="@{/assets/css/style.css}">
+    <link rel="stylesheet" th:href="@{/assets/css/components.css}">
+    <link rel="stylesheet" th:href="@{/assets/bundles/codemirror/theme/duotone-dark.css}">
+    <link rel="stylesheet" th:href="@{/assets/bundles/summernote/summernote-bs4.css}">
+    <link rel="stylesheet" th:href="@{/assets/bundles/codemirror/lib/codemirror.css}">
+    <link rel="stylesheet" th:href="@{/assets/bundles/jquery-selectric/selectric.css}">
+    <!-- Custom style CSS -->
+    <link rel="stylesheet" th:href="@{/assets/css/custom.css}">
+    <link rel='shortcut icon' type='image/x-icon' th:href='@{/assets/img/favicon.ico}' />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" th:href="@{/assets/bundles/izitoast/css/iziToast.min.css}">
+    <style>
+        /* HTML: <div class="loader"></div> */
+        /*.loader_factory {*/
+        /*    height: 10px;*/
+        /*    width: 100%;*/
+        /*    --c:no-repeat linear-gradient(#00ee5f 0 0);*/
+        /*    background: var(--c),var(--c), #b8fcb9;*/
+        /*    background-size: 60% 100%;*/
+        /*    animation: l16 3s infinite;*/
+        /*}*/
+        /*@keyframes l16 {*/
+        /*    0%   {background-position:-150% 0,-150% 0}*/
+        /*    66%  {background-position: 250% 0,-150% 0}*/
+        /*    100% {background-position: 250% 0, 250% 0}*/
+        /*}*/
+
+        .loader_factory {
+            width: 100px;
+            aspect-ratio: 1;
+            display: grid;
+            border: 4px solid #0000;
+            border-radius: 50%;
+            border-right-color: #25b09b;
+            animation: l15 1s infinite linear;
+        }
+        .loader_factory::before,
+        .loader_factory::after {
+            content: "";
+            grid-area: 1/1;
+            margin: 2px;
+            border: inherit;
+            border-radius: 50%;
+            animation: l15 2s infinite;
+        }
+        .loader_factory::after {
+            margin: 8px;
+            animation-duration: 3s;
+        }
+        @keyframes l15{
+            100%{transform: rotate(1turn)}
+        }
+    </style>
+</head>
+<body>
+    <div class="loader"></div>
+    <div id="app">
+        <div class="main-wrapper main-wrapper-1">
+            <div th:replace="~{layout/front/sidebar :: sidebar}"></div>
+            <!-- Main Content -->
+            <div class="main-content">
+                <section class="section">
+                    <div class="section-body">
+                        <div class="row">
+                            <div class="col-lg-12 col-md-12 col-sm-12 col-xs-12">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h4>Migration de base de donn&eacute;es</h4>
+                                    </div>
+                                    <div class="card-body">
+                                        <form id="wizard_with_validation">
+                                            <h3>Oracle Database</h3>
+                                            <fieldset>
+                                                <div class="form-group form-float">
+                                                    <div class="form-line">
+                                                        <label class="form-label">Host</label>
+                                                        <div class="input-group">
+                                                            <div class="input-group-prepend">
+                                                                <div class="input-group-text">
+                                                                    <i class="fas fa-server"></i>
+                                                                </div>
+                                                            </div>
+                                                            <input type="text" name="hostOracle" id="hostOracle" class="form-control" required>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group form-float">
+                                                    <div class="form-line">
+                                                        <label class="form-label">Port</label>
+                                                        <div class="input-group">
+                                                            <div class="input-group-prepend">
+                                                                <div class="input-group-text">
+                                                                    <i class="fas fa-plug"></i>
+                                                                </div>
+                                                            </div>
+                                                            <input type="number" name="portOracle" id="portOracle" class="form-control" required>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group form-float">
+                                                    <div class="form-line">
+                                                        <label class="form-label">Nom du service</label>
+                                                        <div class="input-group">
+                                                            <div class="input-group-prepend">
+                                                                <div class="input-group-text">
+                                                                    <i class="fas fa-network-wired"></i>
+                                                                </div>
+                                                            </div>
+                                                            <input type="text" name="serviceOracle" id="serviceOracle" class="form-control" required>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group form-float">
+                                                    <div class="form-line">
+                                                        <label class="form-label">SID</label>
+                                                        <div class="input-group">
+                                                            <div class="input-group-prepend">
+                                                                <div class="input-group-text">
+                                                                    <i class="fas fa-id-badge"></i>
+                                                                </div>
+                                                            </div>
+                                                            <input type="text" name="sidOracle" id="sidOracle" class="form-control" required>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group form-float">
+                                                    <div class="form-line">
+                                                        <label class="form-label">Nom de l'utilisateur</label>
+                                                        <div class="input-group">
+                                                            <div class="input-group-prepend">
+                                                                <div class="input-group-text">
+                                                                    <i class="fas fa-user"></i>
+                                                                </div>
+                                                            </div>
+                                                            <input type="text" name="userOracle" id="userOracle" class="form-control" required>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group form-float">
+                                                    <div class="form-line">
+                                                        <label class="form-label">Mot de passe</label>
+                                                        <div class="input-group">
+                                                            <div class="input-group-prepend">
+                                                                <div class="input-group-text">
+                                                                    <i class="fas fa-key"></i>
+                                                                </div>
+                                                            </div>
+                                                            <input type="password" name="mdpOracle" id="mdpOracle" class="form-control">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </fieldset>
+                                            <h3>Postgresql</h3>
+                                            <fieldset>
+                                                <div class="form-group form-float">
+                                                    <div class="form-line">
+                                                        <label class="form-label">Host</label>
+                                                        <div class="input-group">
+                                                            <div class="input-group-prepend">
+                                                                <div class="input-group-text">
+                                                                    <i class="fas fa-server"></i>
+                                                                </div>
+                                                            </div>
+                                                            <input type="text" name="hostPostgres" id="hostPostgres" class="form-control" required>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group form-float">
+                                                    <div class="form-line">
+                                                        <label class="form-label">Port</label>
+                                                        <div class="input-group">
+                                                            <div class="input-group-prepend">
+                                                                <div class="input-group-text">
+                                                                    <i class="fas fa-plug"></i>
+                                                                </div>
+                                                            </div>
+                                                            <input type="number" name="portPostgres" id="portPostgres" class="form-control" required>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group form-float">
+                                                    <div class="form-line">
+                                                        <label class="form-label">Base de donn&eacute;es</label>
+                                                        <div class="input-group">
+                                                            <div class="input-group-prepend">
+                                                                <div class="input-group-text">
+                                                                    <i class="fas fa-database"></i>
+                                                                </div>
+                                                            </div>
+                                                            <input type="text" name="bddPostgres" id="bddPostgres" class="form-control" required>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group form-float">
+                                                    <div class="form-line">
+                                                        <label class="form-label">Nom de l'utilisateur</label>
+                                                        <div class="input-group">
+                                                            <div class="input-group-prepend">
+                                                                <div class="input-group-text">
+                                                                    <i class="fas fa-user"></i>
+                                                                </div>
+                                                            </div>
+                                                            <input type="text" name="userPostgres" id="userPostgres" class="form-control" required>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group form-float">
+                                                    <div class="form-line">
+                                                        <label class="form-label">Mot de passe</label>
+                                                        <div class="input-group">
+                                                            <div class="input-group-prepend">
+                                                                <div class="input-group-text">
+                                                                    <i class="fas fa-key"></i>
+                                                                </div>
+                                                            </div>
+                                                            <input type="password" name="mdpPostgres" id="mdpPostgres" class="form-control">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </fieldset>
+                                            <h3>Validation</h3>
+                                            <fieldset>
+                                                <div class="form-group">
+                                                    <label class="form-label">Mode de migration</label>
+                                                    <div class="selectgroup w-100">
+                                                        <label class="selectgroup-item" id="typeMigration1">
+                                                            <input type="radio" name="typeMigration" value="1" class="selectgroup-input-radio" checked>
+                                                            <span class="selectgroup-button">Oracle <i class="fa fa-arrow-right"></i> Postgresql</span>
+                                                        </label>
+                                                        <label class="selectgroup-item" id="typeMigration2">
+                                                            <input type="radio" name="typeMigration" value="2" class="selectgroup-input-radio">
+                                                            <span class="selectgroup-button">Postgresql <i class="fa fa-arrow-right"></i> Oracle</span>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                                <div class="jumbotron" style="padding: 1rem 1rem">
+                                                    <div id="dashboard" style="display: none">
+                                                        <div class="row">
+                                                            <div class="col-xl-4 col-lg-6">
+                                                                <div class="card">
+                                                                    <div class="card-body card-type-3">
+                                                                        <div class="row">
+                                                                            <div class="col">
+                                                                                <h6 class="text-muted mb-0">Total</h6>
+                                                                                <span class="font-weight-bold mb-0" id="totalStat">0</span>
+                                                                            </div>
+                                                                            <div class="col-auto">
+                                                                                <div class="card-circle l-bg-cyan text-white">
+                                                                                    <i class="fas fa-database"></i>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-xl-4 col-lg-6">
+                                                                <div class="card">
+                                                                    <div class="card-body card-type-3">
+                                                                        <div class="row">
+                                                                            <div class="col">
+                                                                                <h6 class="text-muted mb-0">Succ&egrave;s</h6>
+                                                                                <span class="font-weight-bold mb-0" id="succesStat">0</span>
+                                                                            </div>
+                                                                            <div class="col-auto">
+                                                                                <div class="card-circle l-bg-green text-white">
+                                                                                    <i class="fas fa-check"></i>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-xl-4 col-lg-6">
+                                                                <div class="card">
+                                                                    <div class="card-body card-type-3">
+                                                                        <div class="row">
+                                                                            <div class="col">
+                                                                                <h6 class="text-muted mb-0">&Eacute;chec</h6>
+                                                                                <span class="font-weight-bold mb-0" id="echecStat">0</span>
+                                                                            </div>
+                                                                            <div class="col-auto">
+                                                                                <div class="card-circle bg-red text-white">
+                                                                                    <i class="fas fa-times"></i>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="card">
+                                                            <div class="card-header">
+                                                                <h4>Statistiques</h4>
+                                                            </div>
+                                                            <div class="card-body">
+                                                                <div id="chart2" class="chartsh"></div>
+                                                            </div>
+                                                        </div>
+                                                        <a th:href="@{/home}" class="btn btn-primary w-100">Reinitialiser</a>
+                                                    </div>
+                                                    <div id="loader_container" style="display: none;position: relative;justify-content: center;align-items: center;width: 100%">
+                                                        <div class="loader_factory"></div>
+                                                    </div>
+                                                </div>
+
+<!--                                                <div style="display: flex;justify-content: center;width: 100%;">-->
+<!--                                                    <a class="btn btn-success w-100" style="color: white" onclick="start(this)">Commencer</a>-->
+<!--                                                </div>-->
+                                            </fieldset>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+                <div th:replace="~{layout/front/setting :: sidebar}"></div>
+
+            </div>
+            <div th:replace="~{layout/front/footer :: footer}"></div>
+        </div>
+    </div>
+
+<script th:src="@{/assets/js/app.min.js}"></script>
+<script th:src="@{/assets/bundles/jquery-validation/dist/jquery.validate.min.js}"></script>
+<script th:src="@{/assets/bundles/izitoast/js/iziToast.min.js}"></script>
+<script th:src="@{/assets/bundles/apexcharts/apexcharts.min.js}"></script>
+<!-- JS Libraies -->
+<script th:src="@{/assets/bundles/jquery-steps/jquery.steps.min.js}"></script>
+<!-- Page Specific JS File -->
+<script th:src="@{/assets/js/page/form-wizard.js}"></script>
+<!-- Template JS File -->
+<script th:src="@{/assets/js/scripts.js}"></script>
+<!-- Custom JS File -->
+<script th:src="@{/assets/js/custom.js}"></script>
+
+<script>
+    "use strict";
+
+    async function sendData() {
+        const params = new URLSearchParams();
+        /*Info Oracle*/
+        params.append("hostOracle", document.getElementById("hostOracle").value);
+        params.append("portOracle", document.getElementById("portOracle").value);
+        params.append("serviceOracle", document.getElementById("serviceOracle").value);
+        params.append("sidOracle", document.getElementById("sidOracle").value);
+        params.append("userOracle", document.getElementById("userOracle").value);
+        params.append("mdpOracle", document.getElementById("mdpOracle").value);
+
+        /*Info Postgresql*/
+        params.append("hostPostgres", document.getElementById("hostPostgres").value);
+        params.append("portPostgres", document.getElementById("portPostgres").value);
+        params.append("bddPostgres", document.getElementById("bddPostgres").value);
+        params.append("userPostgres", document.getElementById("userPostgres").value);
+        params.append("mdpPostgres", document.getElementById("mdpPostgres").value);
+
+        /*Type de migration*/
+        params.append("typeMigration", document.querySelector('input[name="typeMigration"]:checked').value);
+
+        // Appel à la servlet
+        await fetch("http://localhost:2621/api/Migration?" + params.toString())
+            .then(response => {
+                if (!response.ok) throw new Error("Erreur serveur " + response.status);
+                return response.json();
+            })
+            .then(data => {
+                let status = data.status;
+                if (status==="success"){
+                    iziToast.success({
+                        title: 'Succes,',
+                        message: data.message,
+                        position: 'topRight'
+                    });
+                    let valTypeMigration = document.querySelector('input[name="typeMigration"]:checked').value;
+                    if (valTypeMigration==="1"){
+                        document.getElementById("typeMigration2").style.display = "none";
+                    }
+                    if (valTypeMigration==="2"){
+                        document.getElementById("typeMigration1").style.display = "none";
+                    }
+                    console.log("Résultat JSON :", data);
+                    /*Manova anle stat global*/
+                    document.getElementById("totalStat").textContent = data.total;
+                    document.getElementById("succesStat").textContent = data.totalSucces;
+                    document.getElementById("echecStat").textContent = data.totalEchec;
+
+                    /*Manova chart*/
+                    chart2(data.statistiques);
+                    let dashBoard = document.getElementById("dashboard");
+                    dashBoard.setAttribute("isPrint","true");
+                }else {
+                    iziToast.error({
+                        title: 'Erreur !',
+                        message: data.message,
+                        position: 'topRight'
+                    });
+                    let dashBoard = document.getElementById("dashboard");
+                    dashBoard.setAttribute("isPrint","false");
+                }
+
+            })
+            .catch(err => {
+                console.error("Erreur AJAX :", err);
+            });
+    }
+
+    function replaceZeros(arr) {
+        return arr.map(x => x === 0 ? null : x);
+    }
+
+    async function start(){
+        var loader = document.getElementById("loader_container");
+        loader.style.display = "flex";
+
+        await sendData();
+
+        loader.style.display = "none";
+        let dashBoard = document.getElementById("dashboard");
+        let isPrint = dashBoard.getAttribute("isPrint");
+        if (isPrint==="true"){
+            dashBoard.style.display = "block";
+        }
+    }
+    document.addEventListener("DOMContentLoaded", function() {
+
+    });
+
+    function chart2(data) {
+        var options = {
+            chart: {
+                height: 250,
+                type: 'bar',
+                stacked: true,
+                toolbar: {
+                    show: false
+                },
+                zoom: {
+                    enabled: true
+                }
+            },
+            plotOptions: {
+                bar: {
+                    horizontal: false,
+                    columnWidth: '50%',
+                    borderRadius: 4
+                },
+            },
+            series: [{
+                name: 'Tables',
+                data: replaceZeros(data.tables)
+            }, {
+                name: 'Views',
+                data: replaceZeros(data.views)
+            }, {
+                name: 'Sequences',
+                data: replaceZeros(data.sequences)
+            }, {
+                name: 'Fonctions',
+                data: replaceZeros(data.fonctions)
+            }],
+            xaxis: {
+                categories: ['Total', 'Succès', 'Échec'], // ✅ ici tes 3 valeurs fixes
+                labels: {
+                    style: {
+                        colors: "#9aa0ac",
+                        fontSize: '13px'
+                    }
+                }
+            },
+            yaxis: {
+                labels: {
+                    style: {
+                        colors: "#9aa0ac"
+                    }
+                }
+            },
+            legend: {
+                position: 'top',
+                offsetY: 5,
+                show: true,
+            },
+            fill: {
+                opacity: 1
+            },
+            // colors: ['#008FFB', '#00E396', '#FEB019'], // optionnel : couleurs personnalisées
+        };
+
+        var chart = new ApexCharts(
+            document.querySelector("#chart2"),
+            options
+        );
+
+        chart.render();
+    }
+
+    // function chart2() {
+    //     var options = {
+    //         chart: {
+    //             height: 250,
+    //             type: 'bar',
+    //             stacked: true,
+    //             toolbar: {
+    //                 show: false
+    //             },
+    //             zoom: {
+    //                 enabled: true
+    //             }
+    //         },
+    //         responsive: [{
+    //             breakpoint: 480,
+    //             options: {
+    //                 legend: {
+    //                     position: 'bottom',
+    //                     offsetX: -10,
+    //                     offsetY: 0
+    //                 }
+    //             }
+    //         }],
+    //         plotOptions: {
+    //             bar: {
+    //                 horizontal: false,
+    //                 columnWidth: '200px',
+    //             },
+    //         },
+    //         series: [{
+    //             name: 'PRODUCT A',
+    //             data: [44, 55, 41, 67, 22, 43]
+    //         }, {
+    //             name: 'PRODUCT B',
+    //             data: [13, 23, 20, 8, 13, 27]
+    //         }, {
+    //             name: 'PRODUCT C',
+    //             data: [11, 17, 15, 15, 21, 14]
+    //         }],
+    //         xaxis: {
+    //             type: 'datetime',
+    //             categories: ['01/01/2019 GMT', '01/02/2019 GMT', '01/03/2019 GMT', '01/04/2019 GMT', '01/05/2019 GMT', '01/06/2019 GMT'],
+    //             labels: {
+    //                 style: {
+    //                     colors: "#9aa0ac"
+    //                 }
+    //             }
+    //         },
+    //         yaxis: {
+    //             labels: {
+    //                 style: {
+    //                     color: "#9aa0ac"
+    //                 }
+    //             }
+    //         },
+    //         legend: {
+    //             position: 'top',
+    //             offsetY: 40,
+    //             show: false,
+    //         },
+    //         fill: {
+    //             opacity: 1
+    //         },
+    //     }
+    //
+    //     var chart = new ApexCharts(
+    //         document.querySelector("#chart2"),
+    //         options
+    //     );
+    //
+    //     chart.render();
+    //
+    // }
+</script>
+</body>
+</html>

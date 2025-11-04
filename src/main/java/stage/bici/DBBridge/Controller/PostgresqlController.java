@@ -14,21 +14,21 @@ import stage.bici.DBBridge.Service.*;
 
 @Controller
 public class PostgresqlController {
-    
+
     @GetMapping("/tablesPostgres")
     public void getMethodName(HttpSession session) {
         PostgreSQL postgres = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
-        try {   
+        try {
             List<String> tables = PostgresService.getTables(postgres);
         } catch (Exception e) {
             e.printStackTrace();
         }
-    }   
+    }
 
     @GetMapping("/columnsPostgres")
     public String getcolumn(HttpSession session) {
          PostgreSQL postgres = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
-        try {   
+        try {
             List<DonneeTablePostgres> columns = PostgresService.getPostgresTableColumns(postgres, "avion");
             for (int i = 0; i < columns.size(); i++) {
                 System.out.println(PostgresService.mapPostgresTypeToOracle(columns.get(i)));
@@ -42,7 +42,7 @@ public class PostgresqlController {
     @GetMapping("/ScriptTablepost_to_oracle")
     public String creatScript(HttpSession session) {
         PostgreSQL postgres = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
-        try {   
+        try {
             String script = PostgresService.generateCreateTableSQL(postgres, "avion");
             System.out.println(script);
         } catch (Exception e) {
@@ -55,7 +55,7 @@ public class PostgresqlController {
     public String executescript(HttpSession session) {
         PostgreSQL postgres = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
         Oracle oracle = session.getAttribute("dbOracle") != null ? (Oracle) session.getAttribute("dbOracle") : null;
-         try {   
+         try {
             String script = PostgresService.generateCreateTableSQL(postgres, "avion");
             PostgresService.createOracleTable(oracle, script);
         } catch (Exception e) {
@@ -68,7 +68,7 @@ public class PostgresqlController {
     public String insert(HttpSession session) {
         PostgreSQL postgres = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
         Oracle oracle = session.getAttribute("dbOracle") != null ? (Oracle) session.getAttribute("dbOracle") : null;
-         try {   
+         try {
             PostgresService.insertDataIntoOracle(postgres, oracle, "avion");
         } catch (Exception e) {
             e.printStackTrace();
@@ -80,7 +80,7 @@ public class PostgresqlController {
     public String migre(HttpSession session) {
         PostgreSQL postgres = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
         Oracle oracle = session.getAttribute("dbOracle") != null ? (Oracle) session.getAttribute("dbOracle") : null;
-         try {   
+        try {
             PostgresService.migrationTablesAndDataPostgresToOracle(oracle,postgres);
         } catch (Exception e) {
             e.printStackTrace();

@@ -13,6 +13,11 @@ public class PageController {
         return "pages/Accueil";
     }
 
+    @GetMapping("/home")
+    public String home() {
+        return "pages/front/Accueil";
+    }
+
     @GetMapping("/infoConnexion")
     public String infoConnexion(Model model) {
         model.addAttribute("oracle", new Oracle());
@@ -21,7 +26,7 @@ public class PageController {
 
      @GetMapping("/infoConnexionPostrges")
     public String infoConnexionPostgres(Model model) {
-        model.addAttribute("postgres", new PostgreSQL()); 
+        model.addAttribute("postgres", new PostgreSQL());
         return "pages/InfoConnexionPostgres";
     }
 }
