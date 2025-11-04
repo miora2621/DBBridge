@@ -14,6 +14,7 @@ import stage.bici.DBBridge.Service.CompleteMigrationService;
 import stage.bici.DBBridge.Service.CompletePostgresToOracleMigration;
 import stage.bici.DBBridge.Service.MigrationStats;
 import stage.bici.DBBridge.Service.OracleService;
+import stage.bici.DBBridge.Service.PostgresMigrationStats;
 import stage.bici.DBBridge.Service.PostgresService;
 
 
@@ -116,9 +117,6 @@ public class OracleController {
         PostgreSQL postgreSQL = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
         try {
             MigrationStats stats = OracleService.migrateCompleteDatabase(oracle, postgreSQL);
-            System.out.println("Total scripts: " + stats.getMigrationScripts().size());
-            System.out.println("Scripts réussis: " + stats.getSuccessfulScripts().size());
-            System.out.println("Scripts échoués: " + stats.getFailedScripts().size());
         } catch (Exception e) {
             e.printStackTrace();    
         }
@@ -130,7 +128,7 @@ public class OracleController {
         Oracle oracle = session.getAttribute("dbOracle") != null ? (Oracle) session.getAttribute("dbOracle") : null;
         PostgreSQL postgreSQL = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
         try {
-            PostgresService.migrateCompleteDatabase(postgreSQL,oracle);
+           PostgresMigrationStats stats = PostgresService.migrateCompleteDatabase(postgreSQL,oracle);
         } catch (Exception e) {
             e.printStackTrace();    
         }

@@ -3,10 +3,8 @@ package stage.bici.DBBridge.Service;
 import java.sql.*;
 import java.util.*;
 import java.util.regex.*;
-import java.util.stream.Collectors;
 import java.math.BigDecimal;
 import stage.bici.DBBridge.Model.DonneeTableOracle;
-import stage.bici.DBBridge.Model.MigrationScript;
 import stage.bici.DBBridge.Model.Oracle;
 import stage.bici.DBBridge.Model.PostgreSQL;
 import stage.bici.DBBridge.TestIA.SqlViewTranslator;
@@ -517,105 +515,73 @@ public class OracleService {
     // ============================================================
 
     private static void migrateSequences(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
-    System.out.println("\n🔢 MIGRATION DES SÉQUENCES...");
-    stats.sequencesTotal = db.validSequences.size();
-    
-    if (db.invalidStats != null && db.invalidStats.invalidSequences > 0) {
-        System.out.println("❌ Séquences invalides ignorées: " + db.invalidStats.invalidSequences);
-    }
-    
-    for (String seqName : db.validSequences) {
-        String oracleScript = "";
-        String postgresScript = "";
+        System.out.println("\n🔢 MIGRATION DES SÉQUENCES...");
+        stats.sequencesTotal = db.validSequences.size();
         
-        try {
-            try (PreparedStatement ps = ora.prepareStatement(
-                "SELECT min_value, max_value, increment_by, last_number, cache_size, cycle_flag " +
-                "FROM all_sequences WHERE sequence_owner=? AND sequence_name=?")) {
-                ps.setString(1, db.owner);
-                ps.setString(2, seqName.toUpperCase());
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        BigDecimal minValue = rs.getBigDecimal(1);
-                        BigDecimal maxValue = rs.getBigDecimal(2);
-                        long increment = rs.getLong(3);
-                        BigDecimal startValue = rs.getBigDecimal(4);
-                        long cacheSize = rs.getLong(5);
-                        String cycleFlag = rs.getString(6);
-                        
-                        // AJOUT: Construire le script Oracle
-                        oracleScript = "CREATE SEQUENCE " + seqName + 
-                            " INCREMENT BY " + increment +
-                            " START WITH " + startValue +
-                            " MINVALUE " + minValue +
-                            " MAXVALUE " + maxValue +
-                            " CACHE " + cacheSize +
-                            ("Y".equalsIgnoreCase(cycleFlag) ? " CYCLE" : " NOCYCLE");
-                        
-                        StringBuilder sql = new StringBuilder("CREATE SEQUENCE IF NOT EXISTS ");
-                        sql.append(quotePg(seqName));
-                        sql.append(" INCREMENT BY ").append(increment);
-                        
-                        if (startValue.compareTo(BigDecimal.valueOf(Long.MAX_VALUE)) > 0) {
-                            sql.append(" START WITH 1");
-                        } else {
-                            sql.append(" START WITH ").append(startValue.longValue());
+        // Afficher d'abord les séquences invalides
+        if (db.invalidStats != null && db.invalidStats.invalidSequences > 0) {
+            System.out.println("❌ Séquences invalides ignorées: " + db.invalidStats.invalidSequences);
+        }
+        
+        for (String seqName : db.validSequences) {
+            try {
+                try (PreparedStatement ps = ora.prepareStatement(
+                    "SELECT min_value, max_value, increment_by, last_number, cache_size, cycle_flag " +
+                    "FROM all_sequences WHERE sequence_owner=? AND sequence_name=?")) {
+                    ps.setString(1, db.owner);
+                    ps.setString(2, seqName.toUpperCase());
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs.next()) {
+                            BigDecimal minValue = rs.getBigDecimal(1);
+                            BigDecimal maxValue = rs.getBigDecimal(2);
+                            long increment = rs.getLong(3);
+                            BigDecimal startValue = rs.getBigDecimal(4);
+                            long cacheSize = rs.getLong(5);
+                            String cycleFlag = rs.getString(6);
+                            
+                            StringBuilder sql = new StringBuilder("CREATE SEQUENCE IF NOT EXISTS ");
+                            sql.append(quotePg(seqName));
+                            sql.append(" INCREMENT BY ").append(increment);
+                            
+                            if (startValue.compareTo(BigDecimal.valueOf(Long.MAX_VALUE)) > 0) {
+                                sql.append(" START WITH 1");
+                            } else {
+                                sql.append(" START WITH ").append(startValue.longValue());
+                            }
+                            
+                            BigDecimal pgMinValue = BigDecimal.valueOf(-9223372036854775807L);
+                            if (minValue.compareTo(pgMinValue) <= 0) {
+                                sql.append(" NO MINVALUE");
+                            } else {
+                                sql.append(" MINVALUE ").append(minValue.longValue());
+                            }
+                            
+                            BigDecimal pgMaxValue = BigDecimal.valueOf(9223372036854775807L);
+                            if (maxValue.compareTo(pgMaxValue) >= 0) {
+                                sql.append(" NO MAXVALUE");
+                            } else {
+                                sql.append(" MAXVALUE ").append(maxValue.longValue());
+                            }
+                            
+                            sql.append(" CACHE ").append(Math.max(1, cacheSize));
+                            sql.append("Y".equalsIgnoreCase(cycleFlag) ? " CYCLE" : " NO CYCLE");
+                            
+                            try (Statement st = pg.createStatement()) {
+                                st.executeUpdate(sql.toString());
+                            }
+                            stats.sequencesSuccess++;
+                            System.out.println("✅ Séquence: " + seqName);
                         }
-                        
-                        BigDecimal pgMinValue = BigDecimal.valueOf(-9223372036854775807L);
-                        if (minValue.compareTo(pgMinValue) <= 0) {
-                            sql.append(" NO MINVALUE");
-                        } else {
-                            sql.append(" MINVALUE ").append(minValue.longValue());
-                        }
-                        
-                        BigDecimal pgMaxValue = BigDecimal.valueOf(9223372036854775807L);
-                        if (maxValue.compareTo(pgMaxValue) >= 0) {
-                            sql.append(" NO MAXVALUE");
-                        } else {
-                            sql.append(" MAXVALUE ").append(maxValue.longValue());
-                        }
-                        
-                        sql.append(" CACHE ").append(Math.max(1, cacheSize));
-                        sql.append("Y".equalsIgnoreCase(cycleFlag) ? " CYCLE" : " NO CYCLE");
-                        
-                        postgresScript = sql.toString(); // AJOUT: Sauvegarder le script PostgreSQL
-                        
-                        try (Statement st = pg.createStatement()) {
-                            st.executeUpdate(sql.toString());
-                        }
-                        stats.sequencesSuccess++;
-                        
-                        // AJOUT: Enregistrer le script
-                        stats.addMigrationScript(new MigrationScript(
-                            seqName, 
-                            MigrationScript.ScriptType.SEQUENCE, 
-                            oracleScript, 
-                            postgresScript
-                        ));
-                        
-                        System.out.println("✅ Séquence: " + seqName);
                     }
                 }
+            } catch (Exception e) {
+                stats.sequencesFailed++;
+                stats.failedSequences.put(seqName, e.getMessage());
+                stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), seqName);
+                stats.addError("❌ SÉQUENCE " + seqName + ": " + e.getMessage());
             }
-        } catch (Exception e) {
-            stats.sequencesFailed++;
-            stats.failedSequences.put(seqName, e.getMessage());
-            stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), seqName);
-            stats.addError("❌ SÉQUENCE " + seqName + ": " + e.getMessage());
-            
-            // AJOUT: Enregistrer même en cas d'échec
-            stats.addMigrationScript(new MigrationScript(
-                seqName, 
-                MigrationScript.ScriptType.SEQUENCE, 
-                oracleScript.isEmpty() ? "-- Script Oracle non disponible" : oracleScript, 
-                postgresScript.isEmpty() ? "-- Script PostgreSQL non généré" : postgresScript,
-                false,
-                e.getMessage()
-            ));
         }
     }
-}
 
     // ============================================================
     // RÉCUPÉRATION COLONNES
@@ -695,70 +661,29 @@ public class OracleService {
     // ============================================================
 
     private static void migrateTables(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
-    System.out.println("\n🔨 MIGRATION DES TABLES...");
-    stats.tablesTotal = db.validTables.size();
-    stats.pkTotal = db.validTables.size();
-    
-    for (String table : db.validTables) {
-        String oracleScript = "";
-        String postgresScript = "";
+        System.out.println("\n🔨 MIGRATION DES TABLES...");
+        stats.tablesTotal = db.validTables.size();
+        stats.pkTotal = db.validTables.size();
         
-        try {
-            // AJOUT: Récupérer le script Oracle via DBMS_METADATA
-            try (PreparedStatement ps = ora.prepareStatement(
-                "SELECT DBMS_METADATA.GET_DDL('TABLE', ?) FROM DUAL")) {
-                ps.setString(1, table.toUpperCase());
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        Clob clob = rs.getClob(1);
-                        if (clob != null) {
-                            oracleScript = clob.getSubString(1, (int) clob.length());
-                        }
-                    }
+        for (String table : db.validTables) {
+            try {
+                String createSQL = generateCreateTableSQL(ora, table);
+                try (Statement stmt = pg.createStatement()) {
+                    stmt.executeUpdate(createSQL);
                 }
+                stats.tablesSuccess++;
+                if (db.pkEnabledByTable.getOrDefault(table, false)) {
+                    stats.pkSuccess++;
+                }
+                System.out.println("✅ Table: " + table);
             } catch (Exception e) {
-                oracleScript = "-- DBMS_METADATA non disponible pour " + table;
+                stats.tablesFailed++;
+                stats.failedTables.add(table);
+                stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), table);
+                stats.addError("❌ TABLE " + table + ": " + e.getMessage());
             }
-            
-            // Générer le script PostgreSQL
-            String createSQL = generateCreateTableSQL(ora, table);
-            postgresScript = createSQL; // AJOUT: Sauvegarder
-            
-            try (Statement stmt = pg.createStatement()) {
-                stmt.executeUpdate(createSQL);
-            }
-            stats.tablesSuccess++;
-            if (db.pkEnabledByTable.getOrDefault(table, false)) {
-                stats.pkSuccess++;
-            }
-            
-            // AJOUT: Enregistrer le script
-            stats.addMigrationScript(new MigrationScript(
-                table, 
-                MigrationScript.ScriptType.TABLE, 
-                oracleScript, 
-                postgresScript
-            ));
-            
-            System.out.println("✅ Table: " + table);
-        } catch (Exception e) {
-            stats.tablesFailed++;
-            stats.failedTables.add(table);
-            stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), table);
-            stats.addError("❌ TABLE " + table + ": " + e.getMessage());
-            
-            // AJOUT: Enregistrer même en cas d'échec
-            stats.addMigrationScript(new MigrationScript(
-                table, 
-                MigrationScript.ScriptType.TABLE, 
-                oracleScript.isEmpty() ? "-- Script Oracle non disponible" : oracleScript, 
-                postgresScript.isEmpty() ? "-- Script PostgreSQL non généré" : postgresScript,
-                false,
-                e.getMessage()
-            ));
         }
     }
-}
 
     // ============================================================
     // MIGRATION DONNÉES
@@ -777,74 +702,30 @@ public class OracleService {
     }
 
     private static void migrateData(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
-    System.out.println("\n📦 MIGRATION DES DONNÉES...");
-    stats.dataTotal = db.validTables.size();
-    
-    for (String table : db.validTables) {
-        String oracleScript = "";
-        String postgresScript = "";
+        System.out.println("\n📦 MIGRATION DES DONNÉES...");
+        stats.dataTotal = db.validTables.size();
         
-        try {
-            if (!tableExistsInPostgres(pg, table)) {
+        for (String table : db.validTables) {
+            try {
+                if (!tableExistsInPostgres(pg, table)) {
+                    stats.dataFailed++;
+                    stats.failedData.add(table);
+                    stats.addErrorSummary("Table inexistante dans PostgreSQL", table);
+                    stats.addError("❌ DONNÉES " + table + ": Table n'existe pas dans PostgreSQL");
+                    continue;
+                }
+                
+                int rowsInserted = insertDataForTable(ora, pg, table, stats);
+                stats.dataSuccess++;
+                System.out.println("✅ Données: " + table + " (" + rowsInserted + " lignes)");
+            } catch (Exception e) {
                 stats.dataFailed++;
                 stats.failedData.add(table);
-                stats.addErrorSummary("Table inexistante dans PostgreSQL", table);
-                stats.addError("❌ DONNÉES " + table + ": Table n'existe pas dans PostgreSQL");
-                
-                // AJOUT: Enregistrer l'échec
-                stats.addMigrationScript(new MigrationScript(
-                    table, 
-                    MigrationScript.ScriptType.DATA, 
-                    "-- Table source: " + table,
-                    "-- Table inexistante dans PostgreSQL",
-                    false,
-                    "Table n'existe pas dans PostgreSQL"
-                ));
-                continue;
+                stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), table);
+                stats.addError("❌ DONNÉES " + table + ": " + e.getMessage());
             }
-            
-            // AJOUT: Construire les scripts
-            oracleScript = "SELECT * FROM " + table.toUpperCase();
-            
-            List<DonneeTableOracle> columns = getOracleTableColumns(ora, table);
-            StringBuilder sb = new StringBuilder("INSERT INTO ").append(quotePg(table)).append(" (");
-            List<String> colNames = new ArrayList<>();
-            for (DonneeTableOracle col : columns) {
-                colNames.add(quotePg(col.getName()));
-            }
-            sb.append(String.join(",", colNames)).append(") VALUES (...)");
-            postgresScript = sb.toString();
-            
-            int rowsInserted = insertDataForTable(ora, pg, table, stats);
-            stats.dataSuccess++;
-            
-            // AJOUT: Enregistrer le script
-            stats.addMigrationScript(new MigrationScript(
-                table, 
-                MigrationScript.ScriptType.DATA, 
-                oracleScript,
-                postgresScript + " -- " + rowsInserted + " lignes insérées"
-            ));
-            
-            System.out.println("✅ Données: " + table + " (" + rowsInserted + " lignes)");
-        } catch (Exception e) {
-            stats.dataFailed++;
-            stats.failedData.add(table);
-            stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), table);
-            stats.addError("❌ DONNÉES " + table + ": " + e.getMessage());
-            
-            // AJOUT: Enregistrer l'échec
-            stats.addMigrationScript(new MigrationScript(
-                table, 
-                MigrationScript.ScriptType.DATA, 
-                oracleScript.isEmpty() ? "SELECT * FROM " + table.toUpperCase() : oracleScript,
-                postgresScript.isEmpty() ? "-- Insertion échouée" : postgresScript,
-                false,
-                e.getMessage()
-            ));
         }
     }
-}
 
     private static int insertDataForTable(Connection ora, Connection pg, String tableName, MigrationStats stats) throws SQLException {
         int totalRows = 0;
@@ -969,464 +850,288 @@ public class OracleService {
     // ============================================================
 
     private static void migrateIndexes(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
-    System.out.println("\n🔍 MIGRATION DES INDEX...");
-    
-    for (String table : db.validTables) {
-        try (PreparedStatement ps = ora.prepareStatement(
-            "SELECT idx.index_name, idx.uniqueness, LISTAGG(cols.column_name, ',') WITHIN GROUP (ORDER BY cols.column_position) AS columns " +
-            "FROM all_indexes idx " +
-            "JOIN all_ind_columns cols ON idx.owner=cols.index_owner AND idx.index_name=cols.index_name " +
-            "WHERE idx.owner=? AND idx.table_name=? " +
-            "AND idx.index_name NOT IN (SELECT constraint_name FROM all_constraints WHERE owner=? AND table_name=? AND constraint_type IN ('P','U')) " +
-            "AND idx.status='VALID' " +
-            "GROUP BY idx.index_name, idx.uniqueness")) {
-            ps.setString(1, db.owner);
-            ps.setString(2, table.toUpperCase());
-            ps.setString(3, db.owner);
-            ps.setString(4, table.toUpperCase());
-            
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    stats.indexTotal++;
-                    String idxName = rs.getString(1);
-                    boolean isUnique = "UNIQUE".equalsIgnoreCase(rs.getString(2));
-                    String[] cols = rs.getString(3).split(",");
-                    
-                    String oracleScript = "";
-                    String postgresScript = "";
-                    
-                    try {
-                        // AJOUT: Construire le script Oracle
-                        List<String> oracleCols = new ArrayList<>();
-                        for (String col : cols) {
-                            oracleCols.add(col.trim());
+        System.out.println("\n🔍 MIGRATION DES INDEX...");
+        
+        for (String table : db.validTables) {
+            try (PreparedStatement ps = ora.prepareStatement(
+                "SELECT idx.index_name, idx.uniqueness, LISTAGG(cols.column_name, ',') WITHIN GROUP (ORDER BY cols.column_position) AS columns " +
+                "FROM all_indexes idx " +
+                "JOIN all_ind_columns cols ON idx.owner=cols.index_owner AND idx.index_name=cols.index_name " +
+                "WHERE idx.owner=? AND idx.table_name=? " +
+                "AND idx.index_name NOT IN (SELECT constraint_name FROM all_constraints WHERE owner=? AND table_name=? AND constraint_type IN ('P','U')) " +
+                "AND idx.status='VALID' " +
+                "GROUP BY idx.index_name, idx.uniqueness")) {
+                ps.setString(1, db.owner);
+                ps.setString(2, table.toUpperCase());
+                ps.setString(3, db.owner);
+                ps.setString(4, table.toUpperCase());
+                
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        stats.indexTotal++;
+                        String idxName = rs.getString(1);
+                        boolean isUnique = "UNIQUE".equalsIgnoreCase(rs.getString(2));
+                        String[] cols = rs.getString(3).split(",");
+                        
+                        try {
+                            List<String> quotedCols = new ArrayList<>();
+                            for (String col : cols) {
+                                quotedCols.add(quotePg(col.trim()));
+                            }
+                            
+                            String uniqueStr = isUnique ? "UNIQUE " : "";
+                            String sql = "CREATE " + uniqueStr + "INDEX IF NOT EXISTS " + quotePg(idxName) +
+                                       " ON " + quotePg(table) + " (" + String.join(",", quotedCols) + ")";
+                            
+                            try (Statement st = pg.createStatement()) {
+                                st.executeUpdate(sql);
+                            }
+                            stats.indexSuccess++;
+                            System.out.println("✅ Index: " + idxName);
+                        } catch (Exception ex) {
+                            stats.indexFailed++;
+                            stats.failedIndexes.put(idxName, ex.getMessage());
+                            stats.addErrorSummary(MigrationStats.classifyError(ex.getMessage()), idxName);
+                            stats.addError("❌ INDEX " + idxName + ": " + ex.getMessage());
                         }
-                        oracleScript = "CREATE " + (isUnique ? "UNIQUE " : "") + "INDEX " + idxName +
-                                     " ON " + table + " (" + String.join(", ", oracleCols) + ")";
-                        
-                        // Construire le script PostgreSQL
-                        List<String> quotedCols = new ArrayList<>();
-                        for (String col : cols) {
-                            quotedCols.add(quotePg(col.trim()));
-                        }
-                        
-                        String uniqueStr = isUnique ? "UNIQUE " : "";
-                        String sql = "CREATE " + uniqueStr + "INDEX IF NOT EXISTS " + quotePg(idxName) +
-                                   " ON " + quotePg(table) + " (" + String.join(",", quotedCols) + ")";
-                        postgresScript = sql; // AJOUT: Sauvegarder
-                        
-                        try (Statement st = pg.createStatement()) {
-                            st.executeUpdate(sql);
-                        }
-                        stats.indexSuccess++;
-                        
-                        // AJOUT: Enregistrer le script
-                        stats.addMigrationScript(new MigrationScript(
-                            idxName, 
-                            MigrationScript.ScriptType.INDEX, 
-                            oracleScript, 
-                            postgresScript
-                        ));
-                        
-                        System.out.println("✅ Index: " + idxName);
-                    } catch (Exception ex) {
-                        stats.indexFailed++;
-                        stats.failedIndexes.put(idxName, ex.getMessage());
-                        stats.addErrorSummary(MigrationStats.classifyError(ex.getMessage()), idxName);
-                        stats.addError("❌ INDEX " + idxName + ": " + ex.getMessage());
-                        
-                        // AJOUT: Enregistrer l'échec
-                        stats.addMigrationScript(new MigrationScript(
-                            idxName, 
-                            MigrationScript.ScriptType.INDEX, 
-                            oracleScript.isEmpty() ? "-- Script Oracle non disponible" : oracleScript,
-                            postgresScript.isEmpty() ? "-- Script PostgreSQL non généré" : postgresScript,
-                            false,
-                            ex.getMessage()
-                        ));
                     }
                 }
-            }
-        } catch (Exception ignored) {}
+            } catch (Exception ignored) {}
+        }
     }
-}
 
     // ============================================================
     // MIGRATION CONTRAINTES
     // ============================================================
 
     private static void migrateConstraints(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
-    System.out.println("\n🔗 MIGRATION DES CONTRAINTES...");
-    
-    // FOREIGN KEYS
-    try (Statement st = ora.createStatement();
-         ResultSet rs = st.executeQuery(
-            "SELECT cons.constraint_name, cons.table_name, " +
-            "LISTAGG(cols.column_name, ',') WITHIN GROUP (ORDER BY cols.position) AS columns, " +
-            "r_cons.table_name AS ref_table, " +
-            "LISTAGG(r_cols.column_name, ',') WITHIN GROUP (ORDER BY r_cols.position) AS ref_columns, " +
-            "cons.delete_rule " +
-            "FROM all_constraints cons " +
-            "JOIN all_cons_columns cols ON cons.owner=cols.owner AND cons.constraint_name=cols.constraint_name " +
-            "JOIN all_constraints r_cons ON cons.r_owner=r_cons.owner AND cons.r_constraint_name=r_cons.constraint_name " +
-            "JOIN all_cons_columns r_cols ON r_cons.owner=r_cols.owner AND r_cons.constraint_name=r_cols.constraint_name " +
-            "WHERE cons.owner='" + db.owner + "' AND cons.constraint_type='R' " +
-            "GROUP BY cons.constraint_name, cons.table_name, r_cons.table_name, cons.delete_rule")) {
-        while (rs.next()) {
-            stats.fkTotal++;
-            String fkName = rs.getString(1);
-            String table = rs.getString(2);
-            String[] cols = rs.getString(3).split(",");
-            String refTable = rs.getString(4);
-            String[] refCols = rs.getString(5).split(",");
-            String deleteRule = rs.getString(6);
-            
-            String oracleScript = "";
-            String postgresScript = "";
-            
-            try {
-                // AJOUT: Construire le script Oracle
-                List<String> oracleCols = new ArrayList<>();
-                for (String col : cols) {
-                    oracleCols.add(col.trim());
+        System.out.println("\n🔗 MIGRATION DES CONTRAINTES...");
+        
+        // FOREIGN KEYS avec NOT VALID
+        try (Statement st = ora.createStatement();
+             ResultSet rs = st.executeQuery(
+                "SELECT cons.constraint_name, cons.table_name, " +
+                "LISTAGG(cols.column_name, ',') WITHIN GROUP (ORDER BY cols.position) AS columns, " +
+                "r_cons.table_name AS ref_table, " +
+                "LISTAGG(r_cols.column_name, ',') WITHIN GROUP (ORDER BY r_cols.position) AS ref_columns, " +
+                "cons.delete_rule " +
+                "FROM all_constraints cons " +
+                "JOIN all_cons_columns cols ON cons.owner=cols.owner AND cons.constraint_name=cols.constraint_name " +
+                "JOIN all_constraints r_cons ON cons.r_owner=r_cons.owner AND cons.r_constraint_name=r_cons.constraint_name " +
+                "JOIN all_cons_columns r_cols ON r_cons.owner=r_cols.owner AND r_cons.constraint_name=r_cols.constraint_name " +
+                "WHERE cons.owner='" + db.owner + "' AND cons.constraint_type='R' " +
+                "GROUP BY cons.constraint_name, cons.table_name, r_cons.table_name, cons.delete_rule")) {
+            while (rs.next()) {
+                stats.fkTotal++;
+                String fkName = rs.getString(1);
+                String table = rs.getString(2);
+                String[] cols = rs.getString(3).split(",");
+                String refTable = rs.getString(4);
+                String[] refCols = rs.getString(5).split(",");
+                String deleteRule = rs.getString(6);
+                try {
+                    List<String> quotedCols = new ArrayList<>();
+                    for (String col : cols) {
+                        quotedCols.add(quotePg(col.trim()));
+                    }
+                    List<String> quotedRefCols = new ArrayList<>();
+                    for (String col : refCols) {
+                        quotedRefCols.add(quotePg(col.trim()));
+                    }
+                    
+                    String sql = "ALTER TABLE " + quotePg(table) + 
+                               " ADD CONSTRAINT " + quotePg(fkName) + 
+                               " FOREIGN KEY (" + String.join(",", quotedCols) + ") " +
+                               " REFERENCES " + quotePg(refTable) + "(" + String.join(",", quotedRefCols) + ")";
+                    if ("CASCADE".equals(deleteRule)) {
+                        sql += " ON DELETE CASCADE";
+                    } else if ("SET NULL".equals(deleteRule)) {
+                        sql += " ON DELETE SET NULL";
+                    }
+                    sql += " NOT VALID";
+                    
+                    try (Statement s = pg.createStatement()) {
+                        s.executeUpdate(sql);
+                    }
+                    stats.fkSuccess++;
+                    System.out.println("✅ FK: " + fkName);
+                } catch (Exception e) {
+                    stats.fkFailed++;
+                    stats.failedFKs.put(fkName, e.getMessage());
+                    stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), fkName);
+                    stats.addError("❌ FK " + fkName + ": " + e.getMessage());
                 }
-                List<String> oracleRefCols = new ArrayList<>();
-                for (String col : refCols) {
-                    oracleRefCols.add(col.trim());
-                }
-                oracleScript = "ALTER TABLE " + table + 
-                             " ADD CONSTRAINT " + fkName + 
-                             " FOREIGN KEY (" + String.join(", ", oracleCols) + ")" +
-                             " REFERENCES " + refTable + " (" + String.join(", ", oracleRefCols) + ")";
-                if ("CASCADE".equals(deleteRule)) {
-                    oracleScript += " ON DELETE CASCADE";
-                } else if ("SET NULL".equals(deleteRule)) {
-                    oracleScript += " ON DELETE SET NULL";
-                }
-                
-                // Construire le script PostgreSQL
-                List<String> quotedCols = new ArrayList<>();
-                for (String col : cols) {
-                    quotedCols.add(quotePg(col.trim()));
-                }
-                List<String> quotedRefCols = new ArrayList<>();
-                for (String col : refCols) {
-                    quotedRefCols.add(quotePg(col.trim()));
-                }
-                
-                String sql = "ALTER TABLE " + quotePg(table) + 
-                           " ADD CONSTRAINT " + quotePg(fkName) + 
-                           " FOREIGN KEY (" + String.join(",", quotedCols) + ") " +
-                           " REFERENCES " + quotePg(refTable) + "(" + String.join(",", quotedRefCols) + ")";
-                if ("CASCADE".equals(deleteRule)) {
-                    sql += " ON DELETE CASCADE";
-                } else if ("SET NULL".equals(deleteRule)) {
-                    sql += " ON DELETE SET NULL";
-                }
-                sql += " NOT VALID";
-                postgresScript = sql; // AJOUT: Sauvegarder
-                
-                try (Statement s = pg.createStatement()) {
-                    s.executeUpdate(sql);
-                }
-                stats.fkSuccess++;
-                
-                // AJOUT: Enregistrer le script
-                stats.addMigrationScript(new MigrationScript(
-                    fkName, 
-                    MigrationScript.ScriptType.FOREIGN_KEY, 
-                    oracleScript, 
-                    postgresScript
-                ));
-                
-                System.out.println("✅ FK: " + fkName);
-            } catch (Exception e) {
-                stats.fkFailed++;
-                stats.failedFKs.put(fkName, e.getMessage());
-                stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), fkName);
-                stats.addError("❌ FK " + fkName + ": " + e.getMessage());
-                
-                // AJOUT: Enregistrer l'échec
-                stats.addMigrationScript(new MigrationScript(
-                    fkName, 
-                    MigrationScript.ScriptType.FOREIGN_KEY, 
-                    oracleScript.isEmpty() ? "-- Script Oracle non disponible" : oracleScript,
-                    postgresScript.isEmpty() ? "-- Script PostgreSQL non généré" : postgresScript,
-                    false,
-                    e.getMessage()
-                ));
             }
+        } catch (Exception e) {
+            // Ignorer les erreurs de cette requête
         }
-    } catch (Exception e) {}
-    
-    // UNIQUE CONSTRAINTS
-    try (Statement st = ora.createStatement();
-         ResultSet rs = st.executeQuery(
-            "SELECT cons.constraint_name, cons.table_name, " +
-            "LISTAGG(cols.column_name, ',') WITHIN GROUP (ORDER BY cols.position) as columns " +
-            "FROM all_constraints cons " +
-            "JOIN all_cons_columns cols ON cons.owner=cols.owner AND cons.constraint_name=cols.constraint_name " +
-            "WHERE cons.owner='" + db.owner + "' AND cons.constraint_type='U' " +
-            "GROUP BY cons.constraint_name, cons.table_name")) {
-        while (rs.next()) {
-            stats.uniqueTotal++;
-            String ukName = rs.getString(1);
-            String table = rs.getString(2);
-            String[] cols = rs.getString(3).split(",");
-            
-            String oracleScript = "";
-            String postgresScript = "";
-            
-            try {
-                // AJOUT: Construire le script Oracle
-                List<String> oracleCols = new ArrayList<>();
-                for (String col : cols) {
-                    oracleCols.add(col.trim());
+        
+        // UNIQUE CONSTRAINTS
+        try (Statement st = ora.createStatement();
+             ResultSet rs = st.executeQuery(
+                "SELECT cons.constraint_name, cons.table_name, " +
+                "LISTAGG(cols.column_name, ',') WITHIN GROUP (ORDER BY cols.position) as columns " +
+                "FROM all_constraints cons " +
+                "JOIN all_cons_columns cols ON cons.owner=cols.owner AND cons.constraint_name=cols.constraint_name " +
+                "WHERE cons.owner='" + db.owner + "' AND cons.constraint_type='U' " +
+                "GROUP BY cons.constraint_name, cons.table_name")) {
+            while (rs.next()) {
+                stats.uniqueTotal++;
+                String ukName = rs.getString(1);
+                String table = rs.getString(2);
+                String[] cols = rs.getString(3).split(",");
+                try {
+                    List<String> colsQuoted = new ArrayList<>();
+                    for (String col : cols) {
+                        colsQuoted.add(quotePg(col.trim()));
+                    }
+                    String sql = "ALTER TABLE " + quotePg(table) + 
+                               " ADD CONSTRAINT " + quotePg(ukName) + 
+                               " UNIQUE (" + String.join(",", colsQuoted) + ")";
+                    try (Statement s = pg.createStatement()) {
+                        s.executeUpdate(sql);
+                    }
+                    stats.uniqueSuccess++;
+                    System.out.println("✅ UNIQUE: " + ukName);
+                } catch (Exception e) {
+                    stats.uniqueFailed++;
+                    stats.failedUniques.put(ukName, e.getMessage());
+                    stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), ukName);
+                    stats.addError("❌ UNIQUE " + ukName + ": " + e.getMessage());
                 }
-                oracleScript = "ALTER TABLE " + table + 
-                             " ADD CONSTRAINT " + ukName + 
-                             " UNIQUE (" + String.join(", ", oracleCols) + ")";
-                
-                // Construire le script PostgreSQL
-                List<String> colsQuoted = new ArrayList<>();
-                for (String col : cols) {
-                    colsQuoted.add(quotePg(col.trim()));
-                }
-                String sql = "ALTER TABLE " + quotePg(table) + 
-                           " ADD CONSTRAINT " + quotePg(ukName) + 
-                           " UNIQUE (" + String.join(",", colsQuoted) + ")";
-                postgresScript = sql; // AJOUT: Sauvegarder
-                
-                try (Statement s = pg.createStatement()) {
-                    s.executeUpdate(sql);
-                }
-                stats.uniqueSuccess++;
-                
-                // AJOUT: Enregistrer le script
-                stats.addMigrationScript(new MigrationScript(
-                    ukName, 
-                    MigrationScript.ScriptType.UNIQUE_CONSTRAINT, 
-                    oracleScript, 
-                    postgresScript
-                ));
-                
-                System.out.println("✅ UNIQUE: " + ukName);
-            } catch (Exception e) {
-                stats.uniqueFailed++;
-                stats.failedUniques.put(ukName, e.getMessage());
-                stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), ukName);
-                stats.addError("❌ UNIQUE " + ukName + ": " + e.getMessage());
-                
-                // AJOUT: Enregistrer l'échec
-                stats.addMigrationScript(new MigrationScript(
-                    ukName, 
-                    MigrationScript.ScriptType.UNIQUE_CONSTRAINT, 
-                    oracleScript.isEmpty() ? "-- Script Oracle non disponible" : oracleScript,
-                    postgresScript.isEmpty() ? "-- Script PostgreSQL non généré" : postgresScript,
-                    false,
-                    e.getMessage()
-                ));
             }
+        } catch (Exception e) {
+            // Ignorer les erreurs de cette requête
         }
-    } catch (Exception e) {}
-    
-    System.out.println("⚠️  CHECK constraints ignorées (SEARCH_CONDITION type LONG incompatible)");
-}
+        
+        System.out.println("⚠️  CHECK constraints ignorées (SEARCH_CONDITION type LONG incompatible)");
+    }
 
     // ============================================================
     // MIGRATION VUES
     // ============================================================
 
     private static void migrateViews(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
-    System.out.println("\n👁️  MIGRATION DES VUES...");
-    stats.viewsTotal = db.validViews.size();
+        System.out.println("\n👁️  MIGRATION DES VUES...");
+        stats.viewsTotal = db.validViews.size();
 
-    if (db.invalidStats != null && db.invalidStats.invalidViews > 0) {
-        System.out.println("❌ Vues invalides ignorées: " + db.invalidStats.invalidViews);
-    }
-
-    List<String> sortedViews = sortViewsByDependencies(db);
-    Set<String> migrated = new HashSet<>();
-    int maxPasses = 10;
-
-    for (int pass = 1; pass <= maxPasses; pass++) {
-        System.out.println("Passe " + pass + "/" + maxPasses + " pour les vues...");
-        int successThisPass = 0;
-
-        for (String viewName : sortedViews) {
-            if (migrated.contains(viewName)) continue;
-
-            String oracleScript = ""; // AJOUT
-            String postgresScript = ""; // AJOUT
-            
-            try {
-                String viewDef = db.viewDefinitions.get(viewName);
-                if (viewDef == null || viewDef.trim().isEmpty()) {
-                    stats.viewsFailed++;
-                    stats.failedViews.put(viewName, "Définition de vue vide");
-                    migrated.add(viewName);
-                    
-                    // AJOUT: Enregistrer l'échec
-                    stats.addMigrationScript(new MigrationScript(
-                        viewName, 
-                        MigrationScript.ScriptType.VIEW, 
-                        "-- Définition vide",
-                        "-- Définition vide",
-                        false,
-                        "Définition de vue vide"
-                    ));
-                    continue;
-                }
-
-                // AJOUT: Récupérer le script Oracle complet
-                try {
-                    oracleScript = getFullViewDefinition(ora, db.owner, viewName);
-                    if (oracleScript == null || oracleScript.isEmpty()) {
-                        oracleScript = "CREATE OR REPLACE VIEW " + viewName + " AS " + viewDef;
-                    }
-                } catch (Exception e) {
-                    oracleScript = "CREATE OR REPLACE VIEW " + viewName + " AS " + viewDef;
-                }
-
-                List<String> columnAliases = getViewColumnAliases(ora, db.owner, viewName);
-                String pgView = convertViewWithAliases(viewName, viewDef, columnAliases);
-                postgresScript = pgView; // AJOUT: Sauvegarder
-
-                try (Statement st = pg.createStatement()) {
-                    st.executeUpdate(pgView);
-                    migrated.add(viewName);
-                    stats.viewsSuccess++;
-                    successThisPass++;
-                    
-                    // AJOUT: Enregistrer le script
-                    stats.addMigrationScript(new MigrationScript(
-                        viewName, 
-                        MigrationScript.ScriptType.VIEW, 
-                        oracleScript, 
-                        postgresScript
-                    ));
-                    
-                    System.out.println("✅ Vue: " + viewName);
-                } catch (Exception e) {
-                    String errorMsg = e.getMessage();
-                    boolean isDependencyError = errorMsg != null && (
-                        errorMsg.toLowerCase().contains("n'existe pas") ||
-                        errorMsg.toLowerCase().contains("does not exist")
-                    );
-
-                    if (isDependencyError && pass < maxPasses) {
-                        System.out.println("⏳ Vue en attente (dépendances): " + viewName);
-                    } else {
-                        stats.viewsFailed++;
-                        stats.failedViews.put(viewName, errorMsg);
-                        stats.addErrorSummary(MigrationStats.classifyError(errorMsg), viewName);
-                        stats.addError("❌ VUE " + viewName + ": " + errorMsg);
-                        migrated.add(viewName);
-                        
-                        // AJOUT: Enregistrer l'échec
-                        stats.addMigrationScript(new MigrationScript(
-                            viewName, 
-                            MigrationScript.ScriptType.VIEW, 
-                            oracleScript, 
-                            postgresScript,
-                            false,
-                            errorMsg
-                        ));
-                    }
-                }
-            } catch (Exception e) {
-                if (pass == maxPasses) {
-                    stats.viewsFailed++;
-                    stats.failedViews.put(viewName, e.getMessage());
-                    stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), viewName);
-                    stats.addError("❌ VUE " + viewName + ": " + e.getMessage());
-                    migrated.add(viewName);
-                    
-                    // AJOUT: Enregistrer l'échec
-                    stats.addMigrationScript(new MigrationScript(
-                        viewName, 
-                        MigrationScript.ScriptType.VIEW, 
-                        oracleScript.isEmpty() ? "-- Script Oracle non disponible" : oracleScript,
-                        postgresScript.isEmpty() ? "-- Script PostgreSQL non généré" : postgresScript,
-                        false,
-                        e.getMessage()
-                    ));
-                }
-            }
+        if (db.invalidStats != null && db.invalidStats.invalidViews > 0) {
+            System.out.println("❌ Vues invalides ignorées: " + db.invalidStats.invalidViews);
         }
 
-        System.out.println("Passe " + pass + ": " + successThisPass + " succès");
-        if (migrated.size() >= db.validViews.size() || (successThisPass == 0 && pass > 2)) break;
-    }
+        List<String> sortedViews = sortViewsByDependencies(db);
+        Set<String> migrated = new HashSet<>();
+        int maxPasses = 10;
 
-    // FALLBACK avec IA
-    // List<String> stillFailed = new ArrayList<>();
-    // for (String viewName : sortedViews) {
-    //     if (stats.failedViews.containsKey(viewName)) {
-    //         stillFailed.add(viewName);
-    //     }
-    // }
+        for (int pass = 1; pass <= maxPasses; pass++) {
+            System.out.println("Passe " + pass + "/" + maxPasses + " pour les vues...");
+            int successThisPass = 0;
 
-    // if (!stillFailed.isEmpty()) {
-    //     System.out.println("\n🔄 FALLBACK: Tentative avec définitions originales...");
-    //     int fallbackSuccess = 0;
+            for (String viewName : sortedViews) {
+                if (migrated.contains(viewName)) continue;
 
-    //     for (String viewName : stillFailed) {
-    //         String oracleScript = "";
-    //         String postgresScript = "";
+                try {
+                    String viewDef = db.viewDefinitions.get(viewName);
+                    if (viewDef == null || viewDef.trim().isEmpty()) {
+                        stats.viewsFailed++;
+                        stats.failedViews.put(viewName, "Définition de vue vide");
+                        migrated.add(viewName);
+                        continue;
+                    }
+
+                    List<String> columnAliases = getViewColumnAliases(ora, db.owner, viewName);
+                    String pgView = convertViewWithAliases(viewName, viewDef, columnAliases);
+
+                    try (Statement st = pg.createStatement()) {
+                        st.executeUpdate(pgView);
+                        migrated.add(viewName);
+                        stats.viewsSuccess++;
+                        successThisPass++;
+                        System.out.println("✅ Vue: " + viewName);
+                    } catch (Exception e) {
+                        String errorMsg = e.getMessage();
+                        boolean isDependencyError = errorMsg != null && (
+                            errorMsg.toLowerCase().contains("n'existe pas") ||
+                            errorMsg.toLowerCase().contains("does not exist")
+                        );
+
+                        if (isDependencyError && pass < maxPasses) {
+                            System.out.println("⏳ Vue en attente (dépendances): " + viewName);
+                        } else {
+                            stats.viewsFailed++;
+                            stats.failedViews.put(viewName, errorMsg);
+                            stats.addErrorSummary(MigrationStats.classifyError(errorMsg), viewName);
+                            stats.addError("❌ VUE " + viewName + ": " + errorMsg);
+                            migrated.add(viewName);
+                        }
+                    }
+                } catch (Exception e) {
+                    if (pass == maxPasses) {
+                        stats.viewsFailed++;
+                        stats.failedViews.put(viewName, e.getMessage());
+                        stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), viewName);
+                        stats.addError("❌ VUE " + viewName + ": " + e.getMessage());
+                        migrated.add(viewName);
             
-    //         try {
-    //             String fullViewDef = getFullViewDefinition(ora, db.owner, viewName);
-    //             oracleScript = fullViewDef; // AJOUT
-                
-    //             if (fullViewDef == null || fullViewDef.trim().isEmpty()) {
-    //                 System.out.println("⚠️  Définition vide pour: " + viewName);
-    //                 continue;
-    //             }
+                    }
+                }
+            }
 
-    //             String viewIA = SqlViewTranslator.translateOracleToPostgres(fullViewDef);
-    //             postgresScript = viewIA; // AJOUT
-                
-    //             System.out.println("View normal: \n" + fullViewDef);
-    //             System.out.println("View IA: \n" + viewIA);
-                
-    //             try (Statement st = pg.createStatement()) {
-    //                 st.executeUpdate(viewIA);
-                    
-    //                 // Mise à jour des stats
-    //                 stats.viewsFailed--;
-    //                 stats.viewsSuccess++;
-    //                 stats.failedViews.remove(viewName);
-    //                 fallbackSuccess++;
-                    
-    //                 // AJOUT: Mettre à jour le script dans la liste
-    //                 // Supprimer l'ancien échec et ajouter le succès
-    //                 stats.getMigrationScripts().removeIf(s -> 
-    //                     s.getObjectName().equals(viewName) && 
-    //                     s.getType() == MigrationScript.ScriptType.VIEW
-    //                 );
-    //                 stats.addMigrationScript(new MigrationScript(
-    //                     viewName, 
-    //                     MigrationScript.ScriptType.VIEW, 
-    //                     oracleScript, 
-    //                     postgresScript
-    //                 ));
-                    
-    //                 System.out.println("🔄 Vue fallback créée: " + viewName);
-    //                 stats.addError("🔄 VUE FALLBACK " + viewName + ": Créée avec traduction IA");
-    //             }
-                
-    //         } catch (Exception e) {
-    //             System.out.println("❌ Échec fallback pour: " + viewName + " - " + e.getMessage());
-    //             // Le script d'échec existe déjà, pas besoin d'en ajouter un nouveau
-    //         }
-    //     }
+            System.out.println("Passe " + pass + ": " + successThisPass + " succès");
+            if (migrated.size() >= db.validViews.size() || (successThisPass == 0 && pass > 2)) break;
+        }
 
-    //     System.out.println("Fallback: " + fallbackSuccess + "/" + stillFailed.size() + " vues créées");
-    // }
+        // // ===== FALLBACK : Tentative avec la définition complète Oracle =====
+        // List<String> stillFailed = new ArrayList<>();
+        // for (String viewName : sortedViews) {
+        //     if (stats.failedViews.containsKey(viewName)) {
+        //         stillFailed.add(viewName);
+        //     }
+        // }
 
-    System.out.println("Vues migrées: " + stats.viewsSuccess + "/" + stats.viewsTotal);
-}
+        // if (!stillFailed.isEmpty()) {
+        //     System.out.println("\n🔄 FALLBACK: Tentative avec définitions originales...");
+        //     int fallbackSuccess = 0;
+
+        //     for (String viewName : stillFailed) {
+        //         try {
+        //             String fullViewDef = getFullViewDefinition(ora, db.owner, viewName);
+
+                    
+        //             if (fullViewDef == null || fullViewDef.trim().isEmpty()) {
+        //                 System.out.println("⚠️  Définition vide pour: " + viewName);
+        //                 continue;
+        //             }
+
+        //             // Traduire la vue Oracle vers PostgreSQL avec l'IA
+        //             String viewIA = SqlViewTranslator.translateOracleToPostgres(fullViewDef);
+
+        //             System.out.println("View normal: \n" + fullViewDef);
+        //             System.out.println("View IA: \n" + viewIA);
+                    
+        //             try (Statement st = pg.createStatement()) {
+        //                 st.executeUpdate(viewIA);
+                        
+        //                 // Mise à jour des stats
+        //                 stats.viewsFailed--;
+        //                 stats.viewsSuccess++;
+        //                 stats.failedViews.remove(viewName);
+        //                 fallbackSuccess++;
+                        
+        //                 System.out.println("🔄 Vue fallback créée: " + viewName);
+        //                 stats.addError("🔄 VUE FALLBACK " + viewName + ": Créée avec traduction IA");
+        //             }
+                    
+        //         } catch (Exception e) {
+        //             System.out.println("❌ Échec fallback pour: " + viewName + " - " + e.getMessage());
+        //         }
+        //     }
+
+        //     System.out.println("Fallback: " + fallbackSuccess + "/" + stillFailed.size() + " vues créées");
+        // }
+
+        System.out.println("Vues migrées: " + stats.viewsSuccess + "/" + stats.viewsTotal);
+    }
 
     private static String getFullViewDefinition(Connection ora, String owner, String viewName) throws SQLException {
         StringBuilder fullDef = new StringBuilder();
@@ -1922,190 +1627,107 @@ public class OracleService {
     // ============================================================
 
     private static void migrateFunctions(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
-    System.out.println("\n🧪 MIGRATION DES FONCTIONS...");
-    stats.functionsTotal = db.validFunctions.size();
-    
-    if (db.invalidStats != null && db.invalidStats.invalidFunctions > 0) {
-        System.out.println("❌ Fonctions invalides ignorées: " + db.invalidStats.invalidFunctions);
-    }
-    
-    for (String funcName : db.validFunctions) {
-        String oracleScript = ""; // AJOUT
-        String postgresScript = ""; // AJOUT
+        System.out.println("\n🧪 MIGRATION DES FONCTIONS...");
+        stats.functionsTotal = db.validFunctions.size();
         
-        try {
-            // Récupérer le code source complet de la fonction
-            StringBuilder source = new StringBuilder();
-            try (PreparedStatement ps = ora.prepareStatement(
-                "SELECT text FROM all_source WHERE owner=? AND name=? AND type='FUNCTION' ORDER BY line")) {
-                ps.setString(1, db.owner);
-                ps.setString(2, funcName.toUpperCase());
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        source.append(rs.getString(1));
+        // Afficher d'abord les fonctions invalides
+        if (db.invalidStats != null && db.invalidStats.invalidFunctions > 0) {
+            System.out.println("❌ Fonctions invalides ignorées: " + db.invalidStats.invalidFunctions);
+        }
+        
+        for (String funcName : db.validFunctions) {
+            try {
+                // Récupérer le code source complet de la fonction
+                StringBuilder source = new StringBuilder();
+                try (PreparedStatement ps = ora.prepareStatement(
+                    "SELECT text FROM all_source WHERE owner=? AND name=? AND type='FUNCTION' ORDER BY line")) {
+                    ps.setString(1, db.owner);
+                    ps.setString(2, funcName.toUpperCase());
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            source.append(rs.getString(1));
+                        }
                     }
                 }
-            }
-            
-            if (source.length() == 0) {
-                stats.functionsFailed++;
-                stats.failedFunctions.put(funcName, "Source vide ou inaccessible");
-                stats.addErrorSummary("Source fonction vide", funcName);
-                stats.addError("❌ FONCTION " + funcName + ": Source vide ou inaccessible");
                 
-                // AJOUT: Enregistrer l'échec
-                stats.addMigrationScript(new MigrationScript(
-                    funcName, 
-                    MigrationScript.ScriptType.FUNCTION, 
-                    "-- Source vide ou inaccessible",
-                    "-- Conversion impossible",
-                    false,
-                    "Source vide ou inaccessible"
-                ));
-                continue;
-            }
-            
-            String fullSource = source.toString();
-            oracleScript = "CREATE OR REPLACE FUNCTION " + funcName + "\n" + fullSource; // AJOUT
-            
-            // Pour les fonctions simples qui retournent des séquences
-            if (fullSource.toUpperCase().contains("RETURN") && fullSource.toUpperCase().contains("SELECT")) {
-                String simpleFunction = createSimpleSequenceFunction(funcName, fullSource);
-                if (simpleFunction != null) {
-                    postgresScript = simpleFunction; // AJOUT
-                    try (Statement st = pg.createStatement()) {
-                        st.executeUpdate(simpleFunction);
-                        stats.functionsSuccess++;
-                        
-                        // AJOUT: Enregistrer le script
-                        stats.addMigrationScript(new MigrationScript(
-                            funcName, 
-                            MigrationScript.ScriptType.FUNCTION, 
-                            oracleScript, 
-                            postgresScript
-                        ));
-                        
-                        System.out.println("✅ Fonction (séquence simple): " + funcName);
-                        continue;
-                    } catch (Exception e) {
-                        // Continuer avec la méthode normale
+                if (source.length() == 0) {
+                    stats.functionsFailed++;
+                    stats.failedFunctions.put(funcName, "Source vide ou inaccessible");
+                    stats.addErrorSummary("Source fonction vide", funcName);
+                    stats.addError("❌ FONCTION " + funcName + ": Source vide ou inaccessible");
+                    continue;
+                }
+                
+                String fullSource = source.toString();
+                
+                // Pour les fonctions simples qui retournent des séquences
+                if (fullSource.toUpperCase().contains("RETURN") && fullSource.toUpperCase().contains("SELECT")) {
+                    String simpleFunction = createSimpleSequenceFunction(funcName, fullSource);
+                    if (simpleFunction != null) {
+                        try (Statement st = pg.createStatement()) {
+                            st.executeUpdate(simpleFunction);
+                            stats.functionsSuccess++;
+                            System.out.println("✅ Fonction (séquence simple): " + funcName);
+                            continue;
+                        } catch (Exception e) {
+                            // Continuer avec la méthode normale
+                        }
                     }
                 }
-            }
-            
-            // Méthode normale pour les fonctions complexes
-            String pgFunction = convertFunctionToPostgresSimple(funcName, fullSource);
-            if (pgFunction != null) {
-                postgresScript = pgFunction; // AJOUT
-                try (Statement st = pg.createStatement()) {
-                    st.executeUpdate(pgFunction);
-                    stats.functionsSuccess++;
-                    
-                    // AJOUT: Enregistrer le script
-                    stats.addMigrationScript(new MigrationScript(
-                        funcName, 
-                        MigrationScript.ScriptType.FUNCTION, 
-                        oracleScript, 
-                        postgresScript
-                    ));
-                    
-                    System.out.println("✅ Fonction: " + funcName);
-                } catch (Exception e) {
-                    // Essayer une version encore plus simple
+                
+                // Méthode normale pour les fonctions complexes
+                String pgFunction = convertFunctionToPostgresSimple(funcName, fullSource);
+                if (pgFunction != null) {
+                    try (Statement st = pg.createStatement()) {
+                        st.executeUpdate(pgFunction);
+                        stats.functionsSuccess++;
+                        System.out.println("✅ Fonction: " + funcName);
+                    } catch (Exception e) {
+                        // Essayer une version encore plus simple
+                        String minimalFunction = createMinimalFunction(funcName);
+                        if (minimalFunction != null) {
+                            try (Statement st = pg.createStatement()) {
+                                st.executeUpdate(minimalFunction);
+                                stats.functionsSuccess++;
+                                System.out.println("✅ Fonction (version minimale): " + funcName);
+                            } catch (Exception e2) {
+                                throw e; // Relancer l'exception originale
+                            }
+                        } else {
+                            throw e;
+                        }
+                    }
+                } else {
+                    // Créer une fonction minimale par défaut
                     String minimalFunction = createMinimalFunction(funcName);
                     if (minimalFunction != null) {
-                        postgresScript = minimalFunction; // AJOUT
                         try (Statement st = pg.createStatement()) {
                             st.executeUpdate(minimalFunction);
                             stats.functionsSuccess++;
-                            
-                            // AJOUT: Enregistrer le script
-                            stats.addMigrationScript(new MigrationScript(
-                                funcName, 
-                                MigrationScript.ScriptType.FUNCTION, 
-                                oracleScript, 
-                                postgresScript
-                            ));
-                            
-                            System.out.println("✅ Fonction (version minimale): " + funcName);
-                        } catch (Exception e2) {
-                            throw e; // Relancer l'exception originale
+                            System.out.println("✅ Fonction (version minimale par défaut): " + funcName);
+                        } catch (Exception e) {
+                            stats.functionsFailed++;
+                            stats.failedFunctions.put(funcName, "Conversion échouée: " + e.getMessage());
+                            stats.addErrorSummary("Conversion fonction échouée", funcName);
+                            stats.addError("❌ FONCTION " + funcName + ": " + e.getMessage());
                         }
                     } else {
-                        throw e;
-                    }
-                }
-            } else {
-                // Créer une fonction minimale par défaut
-                String minimalFunction = createMinimalFunction(funcName);
-                if (minimalFunction != null) {
-                    postgresScript = minimalFunction; // AJOUT
-                    try (Statement st = pg.createStatement()) {
-                        st.executeUpdate(minimalFunction);
-                        stats.functionsSuccess++;
-                        
-                        // AJOUT: Enregistrer le script
-                        stats.addMigrationScript(new MigrationScript(
-                            funcName, 
-                            MigrationScript.ScriptType.FUNCTION, 
-                            oracleScript, 
-                            postgresScript
-                        ));
-                        
-                        System.out.println("✅ Fonction (version minimale par défaut): " + funcName);
-                    } catch (Exception e) {
                         stats.functionsFailed++;
-                        stats.failedFunctions.put(funcName, "Conversion échouée: " + e.getMessage());
-                        stats.addErrorSummary("Conversion fonction échouée", funcName);
-                        stats.addError("❌ FONCTION " + funcName + ": " + e.getMessage());
-                        
-                        // AJOUT: Enregistrer l'échec
-                        stats.addMigrationScript(new MigrationScript(
-                            funcName, 
-                            MigrationScript.ScriptType.FUNCTION, 
-                            oracleScript, 
-                            postgresScript,
-                            false,
-                            e.getMessage()
-                        ));
+                        stats.failedFunctions.put(funcName, "Conversion non supportée");
+                        stats.addErrorSummary("Syntaxe fonction complexe", funcName);
+                        stats.addError("❌ FONCTION " + funcName + ": Conversion non supportée");
                     }
-                } else {
-                    stats.functionsFailed++;
-                    stats.failedFunctions.put(funcName, "Conversion non supportée");
-                    stats.addErrorSummary("Syntaxe fonction complexe", funcName);
-                    stats.addError("❌ FONCTION " + funcName + ": Conversion non supportée");
-                    
-                    // AJOUT: Enregistrer l'échec
-                    stats.addMigrationScript(new MigrationScript(
-                        funcName, 
-                        MigrationScript.ScriptType.FUNCTION, 
-                        oracleScript, 
-                        "-- Conversion non supportée",
-                        false,
-                        "Conversion non supportée"
-                    ));
                 }
+            } catch (Exception e) {
+                stats.functionsFailed++;
+                String errorMsg = e.getMessage();
+                stats.failedFunctions.put(funcName, errorMsg);
+                String errorType = MigrationStats.classifyError(errorMsg);
+                stats.addErrorSummary(errorType, funcName);
+                stats.addError("❌ FONCTION " + funcName + ": " + errorMsg);
             }
-        } catch (Exception e) {
-            stats.functionsFailed++;
-            String errorMsg = e.getMessage();
-            stats.failedFunctions.put(funcName, errorMsg);
-            String errorType = MigrationStats.classifyError(errorMsg);
-            stats.addErrorSummary(errorType, funcName);
-            stats.addError("❌ FONCTION " + funcName + ": " + errorMsg);
-            
-            // AJOUT: Enregistrer l'échec
-            stats.addMigrationScript(new MigrationScript(
-                funcName, 
-                MigrationScript.ScriptType.FUNCTION, 
-                oracleScript.isEmpty() ? "-- Source non disponible" : oracleScript,
-                postgresScript.isEmpty() ? "-- Conversion échouée" : postgresScript,
-                false,
-                errorMsg
-            ));
         }
     }
-}
 
     // Créer une fonction simple pour les séquences
     private static String createSimpleSequenceFunction(String name, String oracleSource) {
@@ -2138,39 +1760,6 @@ public class OracleService {
         } catch (Exception e) {
             return null;
         }
-    }
-
-    // ============================================================
-    // AJOUTS À LA CLASSE MigrationStats
-    // ============================================================
-    // Ajouter cette propriété dans votre classe MigrationStats existante:
-
-    private List<MigrationScript> migrationScripts = new ArrayList<>();
-
-    public void addMigrationScript(MigrationScript script) {
-        this.migrationScripts.add(script);
-    }
-
-    public List<MigrationScript> getMigrationScripts() {
-        return migrationScripts;
-    }
-
-    public List<MigrationScript> getScriptsByType(MigrationScript.ScriptType type) {
-        return migrationScripts.stream()
-            .filter(s -> s.getType() == type)
-            .collect(Collectors.toList());
-    }
-
-    public List<MigrationScript> getSuccessfulScripts() {
-        return migrationScripts.stream()
-            .filter(MigrationScript::isSuccess)
-            .collect(Collectors.toList());
-    }
-
-    public List<MigrationScript> getFailedScripts() {
-        return migrationScripts.stream()
-            .filter(s -> !s.isSuccess())
-            .collect(Collectors.toList());
     }
 
     // Conversion simple pour les fonctions basiques
@@ -2214,183 +1803,87 @@ public class OracleService {
     // ============================================================
 
     private static void migrateTriggers(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
-    System.out.println("\n⚡ MIGRATION DES TRIGGERS...");
-    stats.triggersTotal = db.validTriggers.size();
-    
-    if (db.invalidStats != null && db.invalidStats.invalidTriggers > 0) {
-        System.out.println("❌ Triggers invalides ignorés: " + db.invalidStats.invalidTriggers);
-    }
-    
-    for (String trigName : db.validTriggers) {
-        String oracleScript = ""; // AJOUT
-        String postgresScript = ""; // AJOUT
+        System.out.println("\n⚡ MIGRATION DES TRIGGERS...");
+        stats.triggersTotal = db.validTriggers.size();
         
-        try {
-            // Récupérer les métadonnées du trigger
-            String tableName = null;
-            String triggerType = null;
-            String triggerEvent = null;
-            
-            try (PreparedStatement ps = ora.prepareStatement(
-                "SELECT table_name, trigger_type, triggering_event " +
-                "FROM all_triggers WHERE owner=? AND trigger_name=?")) {
-                ps.setString(1, db.owner);
-                ps.setString(2, trigName.toUpperCase());
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        tableName = rs.getString(1);
-                        triggerType = rs.getString(2);
-                        triggerEvent = rs.getString(3);
-                    }
-                }
-            }
-            
-            // AJOUT: Récupérer le script Oracle complet
-            try (PreparedStatement ps = ora.prepareStatement(
-                "SELECT DBMS_METADATA.GET_DDL('TRIGGER', ?, ?) FROM DUAL")) {
-                ps.setString(1, trigName.toUpperCase());
-                ps.setString(2, db.owner.toUpperCase());
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        Clob clob = rs.getClob(1);
-                        if (clob != null) {
-                            oracleScript = clob.getSubString(1, (int) clob.length());
+        // Afficher d'abord les triggers invalides
+        if (db.invalidStats != null && db.invalidStats.invalidTriggers > 0) {
+            System.out.println("❌ Triggers invalides ignorés: " + db.invalidStats.invalidTriggers);
+        }
+        
+        for (String trigName : db.validTriggers) {
+            try {
+                // Récupérer les métadonnées du trigger
+                String tableName = null;
+                String triggerType = null;
+                String triggerEvent = null;
+                
+                try (PreparedStatement ps = ora.prepareStatement(
+                    "SELECT table_name, trigger_type, triggering_event " +
+                    "FROM all_triggers WHERE owner=? AND trigger_name=?")) {
+                    ps.setString(1, db.owner);
+                    ps.setString(2, trigName.toUpperCase());
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs.next()) {
+                            tableName = rs.getString(1);
+                            triggerType = rs.getString(2);
+                            triggerEvent = rs.getString(3);
                         }
                     }
                 }
+                
+                if (tableName == null) {
+                    // Créer un trigger minimal sans table spécifique
+                    String minimalTrigger = createMinimalTrigger(trigName);
+                    if (minimalTrigger != null) {
+                        try (Statement st = pg.createStatement()) {
+                            // Créer d'abord une table temporaire si elle n'existe pas
+                            st.executeUpdate("CREATE TABLE IF NOT EXISTS " + quotePg("dummy_table_for_triggers") + " (id SERIAL PRIMARY KEY)");
+                            // Puis créer le trigger
+                            st.executeUpdate(minimalTrigger);
+                            stats.triggersSuccess++;
+                            System.out.println("✅ Trigger (version basique): " + trigName);
+                        } catch (Exception e) {
+                            stats.triggersFailed++;
+                            stats.failedTriggers.put(trigName, "Échec création trigger basique: " + e.getMessage());
+                            stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), trigName);
+                            stats.addError("❌ TRIGGER " + trigName + ": " + e.getMessage());
+                        }
+                    } else {
+                        stats.triggersFailed++;
+                        stats.failedTriggers.put(trigName, "Table cible inconnue");
+                        stats.addErrorSummary("Table cible inconnue", trigName);
+                        stats.addError("❌ TRIGGER " + trigName + ": Table cible inconnue");
+                    }
+                } else {
+                    // Créer un trigger avec la table cible spécifique
+                    String pgTrigger = createTriggerForTable(trigName, tableName, triggerType, triggerEvent);
+                    if (pgTrigger != null) {
+                        try (Statement st = pg.createStatement()) {
+                            st.executeUpdate(pgTrigger);
+                            stats.triggersSuccess++;
+                            System.out.println("✅ Trigger: " + trigName + " sur table " + tableName);
+                        } catch (Exception e) {
+                            stats.triggersFailed++;
+                            stats.failedTriggers.put(trigName, "Échec création trigger: " + e.getMessage());
+                            stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), trigName);
+                            stats.addError("❌ TRIGGER " + trigName + ": " + e.getMessage());
+                        }
+                    } else {
+                        stats.triggersFailed++;
+                        stats.failedTriggers.put(trigName, "Conversion non supportée");
+                        stats.addErrorSummary("Conversion trigger non supportée", trigName);
+                        stats.addError("❌ TRIGGER " + trigName + ": Conversion non supportée");
+                    }
+                }
             } catch (Exception e) {
-                // Si DBMS_METADATA échoue, créer un script simplifié
-                if (tableName != null) {
-                    oracleScript = "CREATE OR REPLACE TRIGGER " + trigName + 
-                                 " " + triggerType + " " + triggerEvent + 
-                                 " ON " + tableName;
-                } else {
-                    oracleScript = "-- Métadonnées non disponibles pour " + trigName;
-                }
+                stats.triggersFailed++;
+                stats.failedTriggers.put(trigName, e.getMessage());
+                stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), trigName);
+                stats.addError("❌ TRIGGER " + trigName + ": " + e.getMessage());
             }
-            
-            if (tableName == null) {
-                // Créer un trigger minimal sans table spécifique
-                String minimalTrigger = createMinimalTrigger(trigName);
-                if (minimalTrigger != null) {
-                    postgresScript = minimalTrigger; // AJOUT
-                    try (Statement st = pg.createStatement()) {
-                        // Créer d'abord une table temporaire si elle n'existe pas
-                        st.executeUpdate("CREATE TABLE IF NOT EXISTS " + quotePg("dummy_table_for_triggers") + " (id SERIAL PRIMARY KEY)");
-                        // Puis créer le trigger
-                        st.executeUpdate(minimalTrigger);
-                        stats.triggersSuccess++;
-                        
-                        // AJOUT: Enregistrer le script
-                        stats.addMigrationScript(new MigrationScript(
-                            trigName, 
-                            MigrationScript.ScriptType.TRIGGER, 
-                            oracleScript, 
-                            postgresScript
-                        ));
-                        
-                        System.out.println("✅ Trigger (version basique): " + trigName);
-                    } catch (Exception e) {
-                        stats.triggersFailed++;
-                        stats.failedTriggers.put(trigName, "Échec création trigger basique: " + e.getMessage());
-                        stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), trigName);
-                        stats.addError("❌ TRIGGER " + trigName + ": " + e.getMessage());
-                        
-                        // AJOUT: Enregistrer l'échec
-                        stats.addMigrationScript(new MigrationScript(
-                            trigName, 
-                            MigrationScript.ScriptType.TRIGGER, 
-                            oracleScript, 
-                            postgresScript,
-                            false,
-                            e.getMessage()
-                        ));
-                    }
-                } else {
-                    stats.triggersFailed++;
-                    stats.failedTriggers.put(trigName, "Table cible inconnue");
-                    stats.addErrorSummary("Table cible inconnue", trigName);
-                    stats.addError("❌ TRIGGER " + trigName + ": Table cible inconnue");
-                    
-                    // AJOUT: Enregistrer l'échec
-                    stats.addMigrationScript(new MigrationScript(
-                        trigName, 
-                        MigrationScript.ScriptType.TRIGGER, 
-                        oracleScript, 
-                        "-- Table cible inconnue",
-                        false,
-                        "Table cible inconnue"
-                    ));
-                }
-            } else {
-                // Créer un trigger avec la table cible spécifique
-                String pgTrigger = createTriggerForTable(trigName, tableName, triggerType, triggerEvent);
-                if (pgTrigger != null) {
-                    postgresScript = pgTrigger; // AJOUT
-                    try (Statement st = pg.createStatement()) {
-                        st.executeUpdate(pgTrigger);
-                        stats.triggersSuccess++;
-                        
-                        // AJOUT: Enregistrer le script
-                        stats.addMigrationScript(new MigrationScript(
-                            trigName, 
-                            MigrationScript.ScriptType.TRIGGER, 
-                            oracleScript, 
-                            postgresScript
-                        ));
-                        
-                        System.out.println("✅ Trigger: " + trigName + " sur table " + tableName);
-                    } catch (Exception e) {
-                        stats.triggersFailed++;
-                        stats.failedTriggers.put(trigName, "Échec création trigger: " + e.getMessage());
-                        stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), trigName);
-                        stats.addError("❌ TRIGGER " + trigName + ": " + e.getMessage());
-                        
-                        // AJOUT: Enregistrer l'échec
-                        stats.addMigrationScript(new MigrationScript(
-                            trigName, 
-                            MigrationScript.ScriptType.TRIGGER, 
-                            oracleScript, 
-                            postgresScript,
-                            false,
-                            e.getMessage()
-                        ));
-                    }
-                } else {
-                    stats.triggersFailed++;
-                    stats.failedTriggers.put(trigName, "Conversion non supportée");
-                    stats.addErrorSummary("Conversion trigger non supportée", trigName);
-                    stats.addError("❌ TRIGGER " + trigName + ": Conversion non supportée");
-                    
-                    // AJOUT: Enregistrer l'échec
-                    stats.addMigrationScript(new MigrationScript(
-                        trigName, 
-                        MigrationScript.ScriptType.TRIGGER, 
-                        oracleScript, 
-                        "-- Conversion non supportée",
-                        false,
-                        "Conversion non supportée"
-                    ));
-                }
-            }
-        } catch (Exception e) {
-            stats.triggersFailed++;
-            stats.failedTriggers.put(trigName, e.getMessage());
-            stats.addErrorSummary(MigrationStats.classifyError(e.getMessage()), trigName);
-            stats.addError("❌ TRIGGER " + trigName + ": " + e.getMessage());
-            
-            // AJOUT: Enregistrer l'échec
-            stats.addMigrationScript(new MigrationScript(
-                trigName, 
-                MigrationScript.ScriptType.TRIGGER, 
-                oracleScript.isEmpty() ? "-- Script Oracle non disponible" : oracleScript,
-                postgresScript.isEmpty() ? "-- Script PostgreSQL non généré" : postgresScript,
-                false,
-                e.getMessage()
-            ));
         }
     }
-}
 
     private static String createMinimalTrigger(String name) {
         // Créer un trigger minimal sur une table temporaire
@@ -2445,7 +1938,7 @@ public class OracleService {
         MigrationStats stats = new MigrationStats();
 
         try (Connection oraConn = OracleConnexion(oracle);
-            Connection pgConn = PostgresService.PostgresConnexion(postgres)) {
+             Connection pgConn = PostgresService.PostgresConnexion(postgres)) {
             
             System.out.println("✅ Connexions établies");
             
@@ -2494,6 +1987,17 @@ public class OracleService {
             System.out.println("\n✅ Migration terminée en " + duration + "s");
             
             // Toujours afficher les statistiques
+            stats.tablesFailed = stats.tablesTotal - stats.tablesSuccess;
+            stats.dataFailed = stats.dataTotal - stats.dataSuccess;
+            stats.indexFailed = stats.indexTotal - stats.indexSuccess;
+            stats.fkFailed = stats.fkSuccess - stats.fkTotal;
+            stats.uniqueFailed = stats.uniqueTotal - stats.uniqueSuccess;
+            stats.checkFailed = stats.checkTotal - stats.checkSuccess;
+            stats.viewsFailed = stats.viewsTotal - stats.viewsSuccess;
+            stats.functionsFailed = stats.functionsTotal - stats.functionsSuccess;
+            stats.triggersFailed = stats.triggersTotal - stats.triggersSuccess;
+            stats.pkFailed = stats.pkTotal - stats.pkSuccess;
+
             stats.printDetailed();
             stats.printAllErrorsDetailed();
             
@@ -2506,7 +2010,6 @@ public class OracleService {
             stats.printDetailed();
             stats.printAllErrorsDetailed();
         }
-        
         return stats;
     }
 

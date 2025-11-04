@@ -17,7 +17,7 @@ public class MigrationStats {
     public int fkTotal, fkSuccess, fkFailed;
     public int uniqueTotal, uniqueSuccess, uniqueFailed;
     public int checkTotal, checkSuccess, checkFailed;
-    public int pkTotal, pkSuccess;
+    public int pkTotal, pkSuccess,pkFailed;
     public int viewsTotal, viewsSuccess, viewsFailed;
     public int functionsTotal, functionsSuccess, functionsFailed;
     public int triggersTotal, triggersSuccess, triggersFailed;
@@ -100,7 +100,7 @@ public class MigrationStats {
         }
         printCategoryWithErrors("SÉQUENCES", sequencesSuccess, sequencesTotal, sequencesFailed, failedSequences);
         printCategoryWithErrors("INDEX", indexSuccess, indexTotal, indexFailed, failedIndexes);
-        printCategory("CONTRAINTES PK", pkSuccess, pkTotal, 0, Collections.emptyList());
+        printCategory("CONTRAINTES PK", pkSuccess, pkTotal, pkFailed, Collections.emptyList());
         printCategoryWithErrors("CONTRAINTES FK", fkSuccess, fkTotal, fkFailed, failedFKs);
         printCategoryWithErrors("CONTRAINTES UNIQUE", uniqueSuccess, uniqueTotal, uniqueFailed, failedUniques);
         printCategoryWithErrors("CONTRAINTES CHECK", checkSuccess, checkTotal, checkFailed, failedChecks);

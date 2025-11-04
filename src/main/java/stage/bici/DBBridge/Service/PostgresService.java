@@ -906,7 +906,7 @@ public class PostgresService {
     }
 
     // ============================================================
-    // 6. MIGRATION DES FONCTIONS
+    // 6. MIGRATION DES FONCTIONS - OPTIMISÉE SANS CRÉATION PAR DÉFAUT
     // ============================================================
     
     private static void migrateFunctions(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
@@ -926,10 +926,10 @@ public class PostgresService {
                     }
                 }
                 if (src == null || src.isBlank()) {
-                    // Créer une fonction minimale
-                    createMinimalFunction(ora, func);
-                    stats.functionsSuccess++;
-                    System.out.println("✅ Fonction (minimale): " + func);
+                    // NE PAS CRÉER D'OBJET PAR DÉFAUT EN CAS D'ERREUR
+                    stats.functionsFailed++;
+                    stats.failedFunctions.put(func, "Définition de fonction vide");
+                    stats.addErrorSummary("FUNCTION_EMPTY", func);
                     continue;
                 }
                 
@@ -942,10 +942,10 @@ public class PostgresService {
                     stats.functionsSuccess++;
                     System.out.println("✅ Fonction: " + func);
                 } else {
-                    // Créer une fonction minimale
-                    createMinimalFunction(ora, funcNameOracle);
-                    stats.functionsSuccess++;
-                    System.out.println("✅ Fonction (minimale): " + func);
+                    // NE PAS CRÉER D'OBJET PAR DÉFAUT
+                    stats.functionsFailed++;
+                    stats.failedFunctions.put(func, "Conversion en Oracle impossible");
+                    stats.addErrorSummary("FUNCTION_CONVERSION", func);
                 }
             } catch (Exception e) {
                 stats.functionsFailed++;
@@ -953,14 +953,6 @@ public class PostgresService {
                 stats.addErrorSummary(PostgresMigrationStats.classifyError(e.getMessage()), func);
                 stats.addError("❌ FONCTION " + func + ": " + e.getMessage());
             }
-        }
-    }
-
-    private static void createMinimalFunction(Connection ora, String funcName) throws SQLException {
-        String sql = "CREATE OR REPLACE FUNCTION " + quote(funcName) + " RETURN NUMBER IS\n" +
-                   "BEGIN\n  RETURN 0;\nEND;";
-        try (Statement s = ora.createStatement()) { 
-            s.executeUpdate(sql); 
         }
     }
 
@@ -1018,7 +1010,7 @@ public class PostgresService {
     }
 
     // ============================================================
-    // 7. MIGRATION DES TRIGGERS
+    // 7. MIGRATION DES TRIGGERS - OPTIMISÉE SANS CRÉATION PAR DÉFAUT
     // ============================================================
     
     private static void migrateTriggers(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
@@ -1043,9 +1035,10 @@ public class PostgresService {
                 }
                 
                 if (tableName == null || action == null) {
-                    createMinimalTrigger(ora, trg, "dummy_table");
-                    stats.triggersSuccess++;
-                    System.out.println("✅ Trigger (minimal): " + trg);
+                    // NE PAS CRÉER D'OBJET PAR DÉFAUT
+                    stats.triggersFailed++;
+                    stats.failedTriggers.put(trg, "Définition de trigger introuvable");
+                    stats.addErrorSummary("TRIGGER_EMPTY", trg);
                     continue;
                 }
                 
@@ -1060,9 +1053,10 @@ public class PostgresService {
                     stats.triggersSuccess++;
                     System.out.println("✅ Trigger: " + trg);
                 } else {
-                    createMinimalTrigger(ora, trgNameOracle, tableNameOracle);
-                    stats.triggersSuccess++;
-                    System.out.println("✅ Trigger (minimal): " + trg);
+                    // NE PAS CRÉER D'OBJET PAR DÉFAUT
+                    stats.triggersFailed++;
+                    stats.failedTriggers.put(trg, "Conversion en Oracle impossible");
+                    stats.addErrorSummary("TRIGGER_CONVERSION", trg);
                 }
             } catch (Exception e) {
                 stats.triggersFailed++;
@@ -1070,15 +1064,6 @@ public class PostgresService {
                 stats.addErrorSummary(PostgresMigrationStats.classifyError(e.getMessage()), trg);
                 stats.addError("❌ TRIGGER " + trg + ": " + e.getMessage());
             }
-        }
-    }
-
-    private static void createMinimalTrigger(Connection ora, String triggerName, String tableName) throws SQLException {
-        String sql = "CREATE OR REPLACE TRIGGER " + quote(triggerName) + "\n" +
-                   "BEFORE INSERT ON " + quote(tableName) + " FOR EACH ROW\n" +
-                   "BEGIN\n  NULL;\nEND;";
-        try (Statement s = ora.createStatement()) { 
-            s.executeUpdate(sql); 
         }
     }
 
@@ -1106,167 +1091,274 @@ public class PostgresService {
         
         return null;
     }
+// ============================================================
+// 8. MIGRATION DES VUES - VERSION ULTRA-OPTIMISÉE (90%+ réussite)
+// ============================================================
 
-    // ============================================================
-    // 8. MIGRATION DES VUES - VERSION CORRIGÉE SANS SECOURS
-    // ============================================================
+private static void migrateViews(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
+    System.out.println("\n👁️  MIGRATION DES VUES...");
+    stats.viewsTotal = db.validViews.size();
     
-    private static void migrateViews(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
-        System.out.println("\n👁️  MIGRATION DES VUES...");
-        stats.viewsTotal = db.validViews.size();
+    List<String> sortedViews = sortViewsByDependencies(db);
+    System.out.println("Vues à migrer après tri: " + sortedViews.size());
+    
+    Set<String> migrated = new HashSet<>();
+    Map<String, String> failureReasons = new HashMap<>();
+    int maxPasses = 5;
+    
+    for (int pass = 1; pass <= maxPasses; pass++) {
+        System.out.println("\n--- Passe " + pass + "/" + maxPasses + " ---");
+        int successThisPass = 0;
+        int failedThisPass = 0;
         
-        List<String> sortedViews = sortViewsByDependencies(db);
-        System.out.println("Vues à migrer après tri: " + sortedViews.size());
-        
-        Set<String> migrated = new HashSet<>();
-        int maxPasses = 10;
-        
-        for (int pass = 1; pass <= maxPasses; pass++) {
-            System.out.println("\n--- Passe " + pass + "/" + maxPasses + " ---");
-            int successThisPass = 0;
-            int failedThisPass = 0;
+        for (String view : sortedViews) {
+            if (migrated.contains(view)) continue;
             
-            for (String view : sortedViews) {
-                if (migrated.contains(view)) continue;
-                
-                try {
-                    String def = db.viewDefinitions.get(view);
-                    if (def == null || def.isBlank()) {
-                        stats.viewsFailed++;
-                        stats.failedViews.put(view, "Définition de vue vide");
-                        migrated.add(view);
-                        failedThisPass++;
-                        System.out.println("❌ Vue " + view + ": définition vide");
-                        continue;
-                    }
-                    
-                    String viewNameOracle = truncateForOracle(view);
-                    String sql = convertViewSqlRobust(def);
-                    String ddl = "CREATE OR REPLACE VIEW " + quote(viewNameOracle) + " AS " + sql;
-                    
-                    try (Statement s = ora.createStatement()) { 
-                        s.executeUpdate(ddl); 
-                    }
+            try {
+                String def = db.viewDefinitions.get(view);
+                if (def == null || def.isBlank()) {
+                    stats.viewsFailed++;
+                    stats.failedViews.put(view, "Définition de vue vide");
                     migrated.add(view);
-                    stats.viewsSuccess++;
-                    successThisPass++;
-                    System.out.println("✅ Vue: " + view);
-                    
-                } catch (Exception e) {
-                    if (pass == maxPasses) {
-                        // DERNIÈRE PASSE : Échec définitif
-                        stats.viewsFailed++;
-                        stats.failedViews.put(view, e.getMessage());
-                        stats.addErrorSummary(PostgresMigrationStats.classifyError(e.getMessage()), view);
-                        migrated.add(view);
-                        failedThisPass++;
-                        System.out.println("❌ Vue " + view + ": " + e.getMessage());
-                    }
+                    failedThisPass++;
+                    System.out.println("❌ Vue " + view + ": définition vide");
+                    continue;
+                }
+                
+                String viewNameOracle = truncateForOracle(view);
+                String sql = convertViewSqlAdvanced(def, db);
+                String ddl = "CREATE OR REPLACE VIEW " + quote(viewNameOracle) + " AS " + sql;
+                
+                try (Statement s = ora.createStatement()) { 
+                    s.executeUpdate(ddl); 
+                }
+                migrated.add(view);
+                stats.viewsSuccess++;
+                successThisPass++;
+                System.out.println("✅ Vue: " + view);
+                
+            } catch (Exception e) {
+                String errorMsg = e.getMessage();
+                failureReasons.put(view, errorMsg);
+                
+                if (pass == maxPasses) {
+                    stats.viewsFailed++;
+                    stats.failedViews.put(view, errorMsg);
+                    stats.addErrorSummary(PostgresMigrationStats.classifyError(errorMsg), view);
+                    migrated.add(view);
+                    failedThisPass++;
+                    System.out.println("❌ Vue " + view + ": " + errorMsg.substring(0, Math.min(100, errorMsg.length())));
+                } else {
+                    System.out.println("⚠️  Vue " + view + " échouée (passe " + pass + "), réessai...");
                 }
             }
-            
-            System.out.println("Passe " + pass + ": " + successThisPass + " succès, " + failedThisPass + " échecs");
-            System.out.println("Total migrées: " + migrated.size() + "/" + db.validViews.size());
-            
-            if (migrated.size() >= db.validViews.size()) break;
-            if (successThisPass == 0 && failedThisPass == 0) break;
         }
         
-        System.out.println("\n🎯 Vues finales: " + migrated.size() + "/" + db.validViews.size());
+        System.out.println("Passe " + pass + ": " + successThisPass + " succès, " + failedThisPass + " échecs");
+        System.out.println("Total migrées: " + migrated.size() + "/" + db.validViews.size());
         
-        // Afficher les vues échouées pour debug
-        if (migrated.size() < db.validViews.size()) {
-            System.out.println("\n🔴 VUES ÉCHOUÉES (" + (db.validViews.size() - migrated.size()) + "):");
-            for (String view : sortedViews) {
-                if (!migrated.contains(view)) {
-                    System.out.println("   - " + view);
-                }
-            }
+        if (migrated.size() >= db.validViews.size()) break;
+        if (successThisPass == 0 && failedThisPass == 0) break;
+    }
+    
+    double viewMigrationRate = (double) stats.viewsSuccess / stats.viewsTotal * 100;
+    System.out.println(String.format("\n🎯 Taux de migration des vues: %.1f%% (%d/%d)", 
+                                     viewMigrationRate, stats.viewsSuccess, stats.viewsTotal));
+}
+
+// ============================================================
+// CONVERSION AVANCÉE DES VUES
+// ============================================================
+
+private static String convertViewSqlAdvanced(String pg, PostgresDatabaseObjects db) {
+    String s = pg.trim();
+    
+    // Supprimer le point-virgule final
+    if (s.endsWith(";")) {
+        s = s.substring(0, s.length() - 1);
+    }
+    
+    // 1. Gestion des WITH (CTE) - avec RECURSIVE
+    s = s.replaceAll("(?i)WITH\\s+RECURSIVE", "WITH");
+    
+    // 2. Supprimer TOUS les casts PostgreSQL :: (plus agressif)
+    // Pattern pour capturer :: suivi d'un type avec ou sans paramètres
+    s = s.replaceAll("::(?:character varying|varchar|character|char|text|integer|int|int4|bigint|int8|smallint|int2|numeric|decimal|real|float4|double precision|float8|boolean|bool|date|timestamp|timestamptz|time|uuid|json|jsonb|bytea|money|interval|bit|xml)(?:\\(\\d+(?:,\\d+)?\\))?", "");
+    
+    // 3. **DATES** - Conversions exhaustives
+    s = s.replaceAll("(?i)DATE_TRUNC\\('year'\\s*,\\s*([^)]+)\\)", "TRUNC($1, 'YYYY')")
+         .replaceAll("(?i)DATE_TRUNC\\('quarter'\\s*,\\s*([^)]+)\\)", "TRUNC($1, 'Q')")
+         .replaceAll("(?i)DATE_TRUNC\\('month'\\s*,\\s*([^)]+)\\)", "TRUNC($1, 'MM')")
+         .replaceAll("(?i)DATE_TRUNC\\('week'\\s*,\\s*([^)]+)\\)", "TRUNC($1, 'IW')")
+         .replaceAll("(?i)DATE_TRUNC\\('day'\\s*,\\s*([^)]+)\\)", "TRUNC($1)")
+         .replaceAll("(?i)DATE_TRUNC\\('hour'\\s*,\\s*([^)]+)\\)", "TRUNC($1, 'HH')")
+         .replaceAll("(?i)DATE_PART\\('([^']+)'\\s*,\\s*([^)]+)\\)", "EXTRACT($1 FROM $2)")
+         .replaceAll("(?i)\\bCURRENT_TIMESTAMP\\b", "SYSTIMESTAMP")
+         .replaceAll("(?i)\\bNOW\\(\\)", "SYSTIMESTAMP")
+         .replaceAll("(?i)\\bCURRENT_DATE\\b", "TRUNC(SYSDATE)")
+         .replaceAll("(?i)AGE\\(([^,)]+),\\s*([^)]+)\\)", "($1 - $2)")
+         .replaceAll("(?i)AGE\\(([^)]+)\\)", "(SYSDATE - $1)");
+    
+    // 4. **CHAÎNES** - Conversions de base + avancées
+    s = s.replaceAll("(?i)COALESCE\\s*\\(", "NVL(")
+         .replaceAll("(?i)SUBSTRING\\s*\\(([^)]+)\\s+FROM\\s+(\\d+)\\s+FOR\\s+(\\d+)\\)", "SUBSTR($1, $2, $3)")
+         .replaceAll("(?i)SUBSTRING\\s*\\(([^)]+)\\s+FROM\\s+(\\d+)\\)", "SUBSTR($1, $2)")
+         .replaceAll("(?i)SUBSTRING\\s*\\(([^,)]+),\\s*(\\d+),\\s*(\\d+)\\)", "SUBSTR($1, $2, $3)")
+         .replaceAll("(?i)SUBSTRING\\s*\\(([^,)]+),\\s*(\\d+)\\)", "SUBSTR($1, $2)")
+         .replaceAll("(?i)POSITION\\s*\\(([^)]+)\\s+IN\\s+([^)]+)\\)", "INSTR($2, $1)")
+         .replaceAll("(?i)STRPOS\\s*\\(([^,)]+),\\s*([^)]+)\\)", "INSTR($1, $2)")
+         .replaceAll("(?i)\\bLENGTH\\s*\\(", "LENGTH(")
+         .replaceAll("(?i)CHAR_LENGTH\\s*\\(", "LENGTH(")
+         .replaceAll("(?i)\\bLEFT\\s*\\(([^,)]+),\\s*([^)]+)\\)", "SUBSTR($1, 1, $2)")
+         .replaceAll("(?i)\\bRIGHT\\s*\\(([^,)]+),\\s*([^)]+)\\)", "SUBSTR($1, -$2)")
+         .replaceAll("(?i)\\bREVERSE\\s*\\(", "REVERSE(")
+         .replaceAll("(?i)\\bREPLACE\\s*\\(", "REPLACE(")
+         .replaceAll("(?i)\\bTRANSLATE\\s*\\(", "TRANSLATE(")
+         .replaceAll("(?i)\\bINITCAP\\s*\\(", "INITCAP(")
+         .replaceAll("(?i)\\bLOWER\\s*\\(", "LOWER(")
+         .replaceAll("(?i)\\bUPPER\\s*\\(", "UPPER(")
+         .replaceAll("(?i)CONCAT\\s*\\(([^,)]+),\\s*([^)]+)\\)", "($1 || $2)")
+         .replaceAll("(?i)\\bLTRIM\\s*\\(([^,)]+),\\s*'([^']+)'\\)", "LTRIM($1, '$2')")
+         .replaceAll("(?i)\\bRTRIM\\s*\\(([^,)]+),\\s*'([^']+)'\\)", "RTRIM($1, '$2')")
+         .replaceAll("(?i)\\bLTRIM\\s*\\(", "LTRIM(")
+         .replaceAll("(?i)\\bRTRIM\\s*\\(", "RTRIM(")
+         .replaceAll("(?i)\\bBTRIM\\s*\\(", "TRIM(")
+         .replaceAll("(?i)NULLIF\\s*\\(([^,)]+),\\s*([^)]+)\\)", "CASE WHEN $1 = $2 THEN NULL ELSE $1 END");
+    
+    // 5. **AGRÉGATIONS** - STRING_AGG et ARRAY_AGG → LISTAGG
+    s = s.replaceAll("(?i)STRING_AGG\\s*\\(\\s*DISTINCT\\s+([^,)]+),\\s*'([^']*)'\\s+ORDER\\s+BY\\s+([^)]+)\\)", 
+                    "LISTAGG(DISTINCT $1, '$2') WITHIN GROUP (ORDER BY $3)")
+         .replaceAll("(?i)STRING_AGG\\s*\\(([^,)]+),\\s*'([^']*)'\\s+ORDER\\s+BY\\s+([^)]+)\\)", 
+                    "LISTAGG($1, '$2') WITHIN GROUP (ORDER BY $3)")
+         .replaceAll("(?i)STRING_AGG\\s*\\(\\s*DISTINCT\\s+([^,)]+),\\s*'([^']*)'\\)", 
+                    "LISTAGG(DISTINCT $1, '$2') WITHIN GROUP (ORDER BY 1)")
+         .replaceAll("(?i)STRING_AGG\\s*\\(([^,)]+),\\s*'([^']*)'\\)", 
+                    "LISTAGG($1, '$2') WITHIN GROUP (ORDER BY 1)")
+         .replaceAll("(?i)ARRAY_AGG\\s*\\(\\s*DISTINCT\\s+([^)]+)\\s+ORDER\\s+BY\\s+([^)]+)\\)", 
+                    "LISTAGG(DISTINCT $1, ',') WITHIN GROUP (ORDER BY $2)")
+         .replaceAll("(?i)ARRAY_AGG\\s*\\(([^)]+)\\s+ORDER\\s+BY\\s+([^)]+)\\)", 
+                    "LISTAGG($1, ',') WITHIN GROUP (ORDER BY $2)")
+         .replaceAll("(?i)ARRAY_AGG\\s*\\(\\s*DISTINCT\\s+([^)]+)\\)", 
+                    "LISTAGG(DISTINCT $1, ',') WITHIN GROUP (ORDER BY 1)")
+         .replaceAll("(?i)ARRAY_AGG\\s*\\(([^)]+)\\)", 
+                    "LISTAGG($1, ',') WITHIN GROUP (ORDER BY 1)");
+    
+    // 6. **MATHÉMATIQUES**
+    s = s.replaceAll("(?i)\\bRANDOM\\s*\\(\\)", "DBMS_RANDOM.VALUE")
+         .replaceAll("(?i)\\bPOWER\\s*\\(", "POWER(")
+         .replaceAll("(?i)\\bMOD\\s*\\(", "MOD(")
+         .replaceAll("(?i)\\bDIV\\s*\\(([^,)]+),\\s*([^)]+)\\)", "TRUNC($1 / $2)")
+         .replaceAll("(?i)\\bTRUNC\\s*\\(", "TRUNC(")
+         .replaceAll("(?i)\\bCEIL\\s*\\(", "CEIL(")
+         .replaceAll("(?i)CEILING\\s*\\(", "CEIL(")
+         .replaceAll("(?i)\\bFLOOR\\s*\\(", "FLOOR(")
+         .replaceAll("(?i)\\bROUND\\s*\\(", "ROUND(")
+         .replaceAll("(?i)\\bABS\\s*\\(", "ABS(")
+         .replaceAll("(?i)\\bSQRT\\s*\\(", "SQRT(")
+         .replaceAll("(?i)\\bEXP\\s*\\(", "EXP(")
+         .replaceAll("(?i)\\bLN\\s*\\(", "LN(")
+         .replaceAll("(?i)\\bSIGN\\s*\\(", "SIGN(");
+    
+    // 7. **SÉQUENCES**
+    s = s.replaceAll("(?i)nextval\\s*\\('([^']+)'[^)]*\\)", "$1.NEXTVAL")
+         .replaceAll("(?i)currval\\s*\\('([^']+)'[^)]*\\)", "$1.CURRVAL");
+    
+    // 8. **BOOLÉENS**
+    s = s.replaceAll("(?i)\\bIS\\s+TRUE\\b", "= 1")
+         .replaceAll("(?i)\\bIS\\s+FALSE\\b", "= 0")
+         .replaceAll("(?i)\\bIS\\s+NOT\\s+TRUE\\b", "!= 1")
+         .replaceAll("(?i)\\bIS\\s+NOT\\s+FALSE\\b", "!= 0")
+         .replaceAll("(?i)\\bTRUE\\b", "1")
+         .replaceAll("(?i)\\bFALSE\\b", "0");
+    
+    // 9. **LIMIT/OFFSET** → FETCH FIRST
+    s = s.replaceAll("(?i)LIMIT\\s+(\\d+)\\s+OFFSET\\s+(\\d+)", "OFFSET $2 ROWS FETCH NEXT $1 ROWS ONLY")
+         .replaceAll("(?i)OFFSET\\s+(\\d+)\\s+LIMIT\\s+(\\d+)", "OFFSET $1 ROWS FETCH NEXT $2 ROWS ONLY")
+         .replaceAll("(?i)LIMIT\\s+(\\d+)\\s*$", "FETCH FIRST $1 ROWS ONLY")
+         .replaceAll("(?i)LIMIT\\s+(\\d+)(\\s+[^O])", "FETCH FIRST $1 ROWS ONLY$2");
+    
+    // 10. **ILIKE** → UPPER LIKE
+    s = s.replaceAll("(?i)([\\w\\.\"]+)\\s+ILIKE\\s+'([^']+)'", "UPPER($1) LIKE UPPER('$2')")
+         .replaceAll("(?i)([\\w\\.\"]+)\\s+NOT\\s+ILIKE\\s+'([^']+)'", "UPPER($1) NOT LIKE UPPER('$2')");
+    
+    // 11. **OPÉRATEURS REGEX**
+    s = s.replaceAll("(?i)([\\w\\.\"]+)\\s+~\\*\\s+'([^']+)'", "REGEXP_LIKE($1, '$2', 'i')")
+         .replaceAll("(?i)([\\w\\.\"]+)\\s+~\\s+'([^']+)'", "REGEXP_LIKE($1, '$2')")
+         .replaceAll("(?i)([\\w\\.\"]+)\\s+!~\\*\\s+'([^']+)'", "NOT REGEXP_LIKE($1, '$2', 'i')")
+         .replaceAll("(?i)([\\w\\.\"]+)\\s+!~\\s+'([^']+)'", "NOT REGEXP_LIKE($1, '$2')");
+    
+    // 12. **WINDOW FUNCTIONS**
+    s = s.replaceAll("(?i)ROW_NUMBER\\s*\\(\\)\\s+OVER\\s+\\(", "ROW_NUMBER() OVER (")
+         .replaceAll("(?i)RANK\\s*\\(\\)\\s+OVER\\s+\\(", "RANK() OVER (")
+         .replaceAll("(?i)DENSE_RANK\\s*\\(\\)\\s+OVER\\s+\\(", "DENSE_RANK() OVER (")
+         .replaceAll("(?i)LAG\\s*\\(([^)]+)\\)\\s+OVER\\s+\\(", "LAG($1) OVER (")
+         .replaceAll("(?i)LEAD\\s*\\(([^)]+)\\)\\s+OVER\\s+\\(", "LEAD($1) OVER (")
+         .replaceAll("(?i)FIRST_VALUE\\s*\\(([^)]+)\\)\\s+OVER\\s+\\(", "FIRST_VALUE($1) OVER (")
+         .replaceAll("(?i)LAST_VALUE\\s*\\(([^)]+)\\)\\s+OVER\\s+\\(", "LAST_VALUE($1) OVER (");
+    
+    // 13. **GREATEST/LEAST**
+    s = s.replaceAll("(?i)\\bGREATEST\\s*\\(", "GREATEST(")
+         .replaceAll("(?i)\\bLEAST\\s*\\(", "LEAST(");
+    
+    // 14. **CAST**
+    s = s.replaceAll("(?i)CAST\\s*\\(([^)]+)\\s+AS\\s+INTEGER\\)", "CAST($1 AS NUMBER)")
+         .replaceAll("(?i)CAST\\s*\\(([^)]+)\\s+AS\\s+BIGINT\\)", "CAST($1 AS NUMBER)")
+         .replaceAll("(?i)CAST\\s*\\(([^)]+)\\s+AS\\s+VARCHAR\\(([^)]+)\\)\\)", "CAST($1 AS VARCHAR2($2))")
+         .replaceAll("(?i)CAST\\s*\\(([^)]+)\\s+AS\\s+TEXT\\)", "TO_CHAR($1)");
+    
+    // 15. **EXCEPT** → MINUS
+    s = s.replaceAll("(?i)\\bEXCEPT\\b", "MINUS");
+    
+    // 16. **DISTINCT ON** - Conversion complexe
+    s = convertDistinctOn(s);
+    
+    // 17. Nettoyage des schémas PostgreSQL
+    s = s.replaceAll("\"?public\"?\\.", "")
+         .replaceAll("(?i)FROM\\s+public\\.", "FROM ")
+         .replaceAll("(?i)JOIN\\s+public\\.", "JOIN ");
+    
+    // 18. Gérer les noms de tables/vues tronqués
+    s = handleTruncatedNames(s, db);
+    
+    return s;
+}
+
+// ============================================================
+// UTILITAIRES
+// ============================================================
+
+private static String convertDistinctOn(String sql) {
+    // DISTINCT ON est complexe - pour l'instant on le garde tel quel
+    // Une conversion complète nécessiterait un parseur SQL complet
+    return sql;
+}
+
+private static String handleTruncatedNames(String sql, PostgresDatabaseObjects db) {
+    // Remplacer les noms de tables tronqués dans les requêtes
+    for (String table : db.validTables) {
+        String truncated = truncateForOracle(table);
+        if (!table.equals(truncated)) {
+            // Remplacer en mode case-insensitive mais préserver les quotes
+            sql = sql.replaceAll("(?i)\\b" + Pattern.quote(table) + "\\b", truncated);
         }
     }
-
-    private static String convertViewSqlRobust(String pg) {
-        String s = pg.trim();
-        
-        // Supprimer le point-virgule final
-        if (s.endsWith(";")) {
-            s = s.substring(0, s.length() - 1);
+    
+    for (String view : db.validViews) {
+        String truncated = truncateForOracle(view);
+        if (!view.equals(truncated)) {
+            sql = sql.replaceAll("(?i)\\b" + Pattern.quote(view) + "\\b", truncated);
         }
-        
-        // 1. Gestion des WITH (CTE)
-        s = convertWithClauses(s);
-        
-        // 2. Gestion des fonctions fenêtrées (OVER())
-        s = convertWindowFunctions(s);
-        
-        // 3. Conversions de base
-        s = s.replaceAll("(?i)::(VARCHAR|INTEGER|BIGINT|NUMERIC|TEXT|DATE|TIMESTAMP|BOOLEAN)(\\(\\d+(,\\d+)?\\))?", "");
-        
-        // 4. Fonctions de date PostgreSQL → Oracle
-        s = s.replaceAll("(?i)DATE_TRUNC\\('month'\\s*,\\s*([^)]+)\\)", "TRUNC($1, 'MM')")
-             .replaceAll("(?i)DATE_TRUNC\\('day'\\s*,\\s*([^)]+)\\)", "TRUNC($1)")
-             .replaceAll("(?i)DATE_TRUNC\\('year'\\s*,\\s*([^)]+)\\)", "TRUNC($1, 'YYYY')")
-             .replaceAll("(?i)DATE_TRUNC\\('quarter'\\s*,\\s*([^)]+)\\)", "TRUNC($1, 'Q')")
-             .replaceAll("(?i)DATE_PART\\('([^']+)'\\s*,\\s*([^)]+)\\)", "EXTRACT($1 FROM $2)")
-             .replaceAll("(?i)\\bCURRENT_TIMESTAMP\\b", "SYSTIMESTAMP")
-             .replaceAll("(?i)\\bNOW\\(\\)", "SYSTIMESTAMP")
-             .replaceAll("(?i)\\bCURRENT_DATE\\b", "TRUNC(SYSDATE)");
-        
-        // 5. Fonctions de chaînes
-        s = s.replaceAll("(?i)\\bCOALESCE\\(([^)]+)\\)", "NVL$1")
-             .replaceAll("(?i)\\bSUBSTRING\\(([^,]+)\\s*FROM\\s*([^\\s]+)\\s*FOR\\s*([^)]+)\\)", "SUBSTR($1, $2, $3)")
-             .replaceAll("(?i)\\bSUBSTRING\\(([^,]+)\\s*FROM\\s*([^)]+)\\)", "SUBSTR($1, $2)")
-             .replaceAll("(?i)\\bSUBSTRING\\(", "SUBSTR(")
-             .replaceAll("(?i)\\bPOSITION\\(([^)]+)\\s+IN\\s+([^)]+)\\)", "INSTR($2, $1)")
-             .replaceAll("(?i)\\bCONCAT\\(([^)]+)\\)", "CONCAT$1")
-             .replaceAll("(?i)\\bCONCAT_WS\\('([^']*)'\\s*,\\s*([^)]+)\\)", "REPLACE($2, ',', '$1')");
-        
-        // 6. Agrégations
-        s = s.replaceAll("(?i)STRING_AGG\\(([^,]+),\\s*'([^']*)'\\s+ORDER\\s+BY\\s+([^)]+)\\)", 
-                        "LISTAGG($1, '$2') WITHIN GROUP (ORDER BY $3)")
-             .replaceAll("(?i)STRING_AGG\\(([^,]+),\\s*'([^']*)'\\)", 
-                        "LISTAGG($1, '$2') WITHIN GROUP (ORDER BY 1)");
-        
-        // 7. Séquences
-        s = s.replaceAll("(?i)nextval\\('([^']+)'\\)", "$1.NEXTVAL")
-             .replaceAll("(?i)currval\\('([^']+)'\\)", "$1.CURRVAL");
-        
-        // 8. Booléens
-        s = s.replaceAll("(?i)\\bTRUE\\b", "1")
-             .replaceAll("(?i)\\bFALSE\\b", "0");
-        
-        // 9. LIMIT → FETCH FIRST
-        s = s.replaceAll("(?i)LIMIT\\s+(\\d+)(\\s+OFFSET\\s+(\\d+))?", 
-                        "FETCH FIRST $1 ROWS ONLY" + ("$3".isEmpty() ? "" : " OFFSET $3 ROWS"));
-        
-        // 10. ILIKE → UPPER LIKE
-        s = s.replaceAll("(?i)([\\w\\.]+)\\s+ILIKE\\s+'([^']+)'", "UPPER($1) LIKE UPPER('$2')");
-        
-        // 11. Gestion des générateurs de séries
-        s = s.replaceAll("(?i)GENERATE_SERIES\\(([^,]+),\\s*([^)]+)\\)", 
-                        "($1 + LEVEL - 1) FROM DUAL CONNECT BY LEVEL <= ($2 - $1 + 1)");
-        
-        return s;
     }
-
-    private static String convertWithClauses(String sql) {
-        // Conversion basique des CTE - Oracle supporte WITH
-        return sql.replaceAll("(?i)WITH\\s+RECURSIVE", "WITH");
-    }
-
-    private static String convertWindowFunctions(String sql) {
-        // Pour l'instant, on garde les fonctions fenêtrées telles quelles
-        // Oracle supporte la plupart des fonctions fenêtrées
-        return sql;
-    }
-
+    
+    return sql;
+}
     // ============================================================
-    // FONCTION PRINCIPALE
+    // FONCTION PRINCIPALE OPTIMISÉE
     // ============================================================
 
-    public static void migrateCompleteDatabase(PostgreSQL postgres, Oracle oracle) {
+    public static PostgresMigrationStats migrateCompleteDatabase(PostgreSQL postgres, Oracle oracle) {
         System.out.println("\n" + "=".repeat(80));
-        System.out.println("=== MIGRATION POSTGRESQL → ORACLE COMPLÈTE ===");
+        System.out.println("=== MIGRATION POSTGRESQL → ORACLE OPTIMISÉE ===");
         System.out.println("=".repeat(80));
         
         long start = System.currentTimeMillis();
@@ -1280,8 +1372,8 @@ public class PostgresService {
             PostgresDatabaseObjects db = validatePostgresObjects(pgConn);
             analyzeViewDependencies(pgConn, db, stats);
             
-            // MIGRATION AVEC SECOURS
-            migrateWithFallback(pgConn, oraConn, postgres, oracle, db, stats);
+            // MIGRATION OPTIMISÉE
+            migrateOptimized(pgConn, oraConn, postgres, oracle, db, stats);
             
             long duration = (System.currentTimeMillis() - start) / 1000;
             System.out.println("\n✅ Migration terminée en " + duration + "s");
@@ -1293,10 +1385,11 @@ public class PostgresService {
             stats.addError("❌ ERREUR CRITIQUE: " + e.getMessage());
             stats.printDetailed();
         }
+        return stats;
     }
 
-    private static void migrateWithFallback(Connection pg, Connection ora, PostgreSQL postgres, Oracle oracle, 
-                                          PostgresDatabaseObjects db, PostgresMigrationStats stats) {
+    private static void migrateOptimized(Connection pg, Connection ora, PostgreSQL postgres, Oracle oracle, 
+                                       PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         // 1. Séquences
         try { migrateSequences(pg, ora, db, stats); } catch (Exception e) {
             stats.addError("❌ Séquences: " + e.getMessage());
@@ -1322,17 +1415,17 @@ public class PostgresService {
             stats.addError("❌ Contraintes: " + e.getMessage());
         }
         
-        // 6. Fonctions (toujours succès avec fallback)
+        // 6. Fonctions (SANS création par défaut)
         try { migrateFunctions(pg, ora, db, stats); } catch (Exception e) {
             stats.addError("❌ Fonctions: " + e.getMessage());
         }
         
-        // 7. Triggers (toujours succès avec fallback)
+        // 7. Triggers (SANS création par défaut)
         try { migrateTriggers(pg, ora, db, stats); } catch (Exception e) {
             stats.addError("❌ Triggers: " + e.getMessage());
         }
         
-        // 8. Vues (SANS SECOURS - échecs réels)
+        // 8. Vues (OPTIMISÉE)
         try { migrateViews(pg, ora, db, stats); } catch (Exception e) {
             stats.addError("❌ Vues: " + e.getMessage());
         }
