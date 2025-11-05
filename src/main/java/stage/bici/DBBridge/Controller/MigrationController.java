@@ -3,6 +3,7 @@ package stage.bici.DBBridge.Controller;
 import org.springframework.web.bind.annotation.*;
 import stage.bici.DBBridge.Model.Oracle;
 import stage.bici.DBBridge.Model.PostgreSQL;
+import stage.bici.DBBridge.Service.MigrationStats;
 import stage.bici.DBBridge.Service.OracleService;
 import stage.bici.DBBridge.Service.PostgresMigrationStats;
 import stage.bici.DBBridge.Service.PostgresService;
@@ -90,7 +91,7 @@ public class MigrationController {
 
         Map<String,Integer[]> statistiques = new HashMap<>();
         if (typeMigration==1){
-            PostgresMigrationStats stats = PostgresService.migrateCompleteDatabase(postgreSQL,oracle);
+            MigrationStats stats = OracleService.migrateCompleteDatabase(oracle, postgreSQL);
             /* le indice 0 : Total */
             /* le indice 1 : Succes */
             /* le indice 2 : Echec */
@@ -101,14 +102,14 @@ public class MigrationController {
         }
         if (typeMigration==2){
             /* Void le izy de ts nataoko */
-//            PostgresService.migrationTablesAndDataPostgresToOracle(oracle,postgreSQL);
+            PostgresMigrationStats stats = PostgresService.migrateCompleteDatabase(postgreSQL,oracle);
             /* le indice 0 : Total */
             /* le indice 1 : Succes */
             /* le indice 2 : Echec */
-            statistiques.put("tables",new Integer[]{4,2,2});
-            statistiques.put("views",new Integer[]{3,2,1});
-            statistiques.put("sequences",new Integer[]{2,2,0});
-            statistiques.put("fonctions",new Integer[]{1,0,1});
+            statistiques.put("tables",new Integer[]{stats.tablesTotal,stats.tablesSuccess, stats.tablesFailed});
+            statistiques.put("views",new Integer[]{stats.viewsTotal,stats.viewsSuccess,stats.viewsFailed});
+            statistiques.put("sequences",new Integer[]{stats.sequencesTotal,stats.sequencesSuccess,stats.sequencesFailed});
+            statistiques.put("fonctions",new Integer[]{stats.functionsTotal,stats.functionsSuccess, stats.functionsFailed});
         }
 
         int totalSucces = 0;
