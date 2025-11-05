@@ -127,6 +127,7 @@ public class MigrationController {
         response.put("total", total);
         response.put("totalSucces", totalSucces);
         response.put("totalEchec", totalEchec);
+        response.put("tauxReussite", (totalSucces/total)*100);
 
         return response;
     }
