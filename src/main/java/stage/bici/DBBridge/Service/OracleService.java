@@ -10,7 +10,14 @@ import stage.bici.DBBridge.Model.PostgreSQL;
 import stage.bici.DBBridge.TestIA.SqlViewTranslator;
 
 public class OracleService {
-    
+
+    public String log;
+
+    public OracleService() {
+        this.log = "";
+    }
+
+
     // ============================================================
     // UTILITAIRES
     // ============================================================
@@ -145,13 +152,15 @@ public class OracleService {
     // VALIDATION OBJETS
     // ============================================================
 
-    private static DatabaseObjects validateOracleObjects(Connection ora) throws SQLException {
+    private DatabaseObjects validateOracleObjects(Connection ora) throws SQLException {
         System.out.println("\n🔍 VALIDATION DES OBJETS ORACLE...");
+        log += "\n🔍 VALIDATION DES OBJETS ORACLE...\n";
         DatabaseObjects db = new DatabaseObjects();
         InvalidObjectsStats invalidStats = new InvalidObjectsStats();
         
         db.owner = getCurrentUser(ora);
         System.out.println("Schema Oracle: " + db.owner);
+        log += "Schema Oracle: " + db.owner + "\n";
         
         // Tables (toujours considérées comme valides)
         try (Statement st = ora.createStatement();
@@ -161,6 +170,7 @@ public class OracleService {
             }
         }
         System.out.println("✅ Tables trouvées: " + db.validTables.size());
+        log += "✅ Tables trouvées: " + db.validTables.size() + "\n";
         
         // Séquences avec statut VALID/INVALID
         try (PreparedStatement ps = ora.prepareStatement(
@@ -181,7 +191,9 @@ public class OracleService {
             }
         }
         System.out.println("✅ Séquences valides: " + db.validSequences.size());
+        log += "✅ Séquences valides: " + db.validSequences.size() + "\n";
         System.out.println("❌ Séquences invalides: " + invalidStats.invalidSequences);
+        log += "❌ Séquences invalides: " + invalidStats.invalidSequences + "\n";
         
         // Vues avec statut VALID/INVALID et définitions
         Map<String, String> fullViewDefinitions = new HashMap<>();
@@ -231,7 +243,9 @@ public class OracleService {
         }
     
         System.out.println("✅ Vues valides: " + db.validViews.size());
+        log += "✅ Vues valides: " + db.validViews.size() + "\n";
         System.out.println("❌ Vues invalides: " + invalidStats.invalidViews);
+        log += "❌ Vues invalides: " + invalidStats.invalidViews + "\n";
         
         // Fonctions avec statut VALID/INVALID
         try (PreparedStatement ps = ora.prepareStatement(
@@ -252,7 +266,9 @@ public class OracleService {
             }
         }
         System.out.println("✅ Fonctions valides: " + db.validFunctions.size());
+        log += "✅ Fonctions valides: " + db.validFunctions.size() + "\n";
         System.out.println("❌ Fonctions invalides: " + invalidStats.invalidFunctions);
+        log += "❌ Fonctions invalides: " + invalidStats.invalidFunctions + "\n";
         
         // Triggers avec statut VALID/INVALID
         try (PreparedStatement ps = ora.prepareStatement(
@@ -273,7 +289,9 @@ public class OracleService {
             }
         }
         System.out.println("✅ Triggers valides: " + db.validTriggers.size());
+        log += "✅ Triggers valides: " + db.validTriggers.size() + "\n";
         System.out.println("❌ Triggers invalides: " + invalidStats.invalidTriggers);
+        log += "❌ Triggers invalides: " + invalidStats.invalidTriggers + "\n";
         
         // PK constraints
         try (PreparedStatement ps = ora.prepareStatement(
@@ -305,8 +323,9 @@ public class OracleService {
     // ANALYSE DES DÉPENDANCES DES VUES
     // ============================================================
 
-    private static void analyzeViewDependencies(Connection ora, DatabaseObjects db, MigrationStats stats) {
+    private void analyzeViewDependencies(Connection ora, DatabaseObjects db, MigrationStats stats) {
         System.out.println("\n🔍 ANALYSE DES DÉPENDANCES DES VUES...");
+        log += "\n🔍 ANALYSE DES DÉPENDANCES DES VUES...\n";
         
         Map<String, Set<String>> viewDependencies = new HashMap<>();
         Map<String, Set<String>> missingDependencies = new HashMap<>();
@@ -348,15 +367,21 @@ public class OracleService {
         }
         
         System.out.println("📊 Statistiques dépendances:");
+        log += "📊 Statistiques dépendances:\n";
         System.out.println("   - Vues avec dépendances: " + viewsWithDeps);
+        log += "   - Vues avec dépendances: " + viewsWithDeps + "\n";
         System.out.println("   - Vues sans dépendances: " + (db.validViews.size() - viewsWithDeps));
+        log += "   - Vues sans dépendances: " + (db.validViews.size() - viewsWithDeps) + "\n";
         System.out.println("   - Vues avec dépendances manquantes: " + viewsWithMissing);
+        log += "   - Vues avec dépendances manquantes: " + viewsWithMissing + "\n";
         
         // Afficher les vues avec dépendances manquantes
         if (!missingDependencies.isEmpty()) {
             System.out.println("\n⚠️  DÉPENDANCES MANQUANTES:");
+            log += "\n⚠️  DÉPENDANCES MANQUANTES:\n";
             for (Map.Entry<String, Set<String>> entry : missingDependencies.entrySet()) {
                 System.out.println("   - " + entry.getKey() + " → " + entry.getValue());
+                log += "   - " + entry.getKey() + " → " + entry.getValue() + "\n";
             }
         }
         
@@ -415,8 +440,9 @@ public class OracleService {
     // TRI TOPOLOGIQUE DES VUES
     // ============================================================
 
-    private static List<String> sortViewsByDependencies(DatabaseObjects db) {
+    private List<String> sortViewsByDependencies(DatabaseObjects db) {
         System.out.println("\n🔄 TRI TOPOLOGIQUE DES VUES...");
+        log += "\n🔄 TRI TOPOLOGIQUE DES VUES...\n";
         
         // Construire le graphe de dépendances complet
         Map<String, Set<String>> dependencies = new HashMap<>();
@@ -479,12 +505,14 @@ public class OracleService {
         // Gérer les cycles détectés
         if (sorted.size() < db.validViews.size()) {
             System.out.println("⚠️  Cycles de dépendances détectés!");
+            log += "⚠️  Cycles de dépendances détectés!\n";
             
             // Ajouter les vues restantes (celles dans des cycles)
             Set<String> remaining = new HashSet<>(db.validViews);
             remaining.removeAll(sorted);
             
             System.out.println("⚠️  Vues dans des cycles: " + remaining);
+            log += "⚠️  Vues dans des cycles: " + remaining + "\n";
             
             // Essayer de résoudre les cycles en ordre alphabétique
             List<String> cyclic = new ArrayList<>(remaining);
@@ -494,17 +522,22 @@ public class OracleService {
         
         // Vérification finale
         System.out.println("✅ Vues triées: " + sorted.size() + "/" + db.validViews.size());
+        log += "✅ Vues triées: " + sorted.size() + "/" + db.validViews.size() + "\n";
         
         // Afficher l'ordre pour debug
         System.out.println("📋 Ordre de migration:");
+        log += "📋 Ordre de migration:\n";
         for (int i = 0; i < Math.min(10, sorted.size()); i++) {
             String view = sorted.get(i);
             Set<String> deps = dependencies.get(view);
             System.out.println("   " + (i+1) + ". " + view + 
                 (deps.isEmpty() ? " (sans dépendances)" : " (dépend de: " + deps + ")"));
+            log += "   " + (i+1) + ". " + view + 
+                (deps.isEmpty() ? " (sans dépendances)" : " (dépend de: " + deps + ")") + "\n";
         }
         if (sorted.size() > 10) {
             System.out.println("   ... (" + (sorted.size() - 10) + " vues supplémentaires)");
+            log += "   ... (" + (sorted.size() - 10) + " vues supplémentaires)\n";
         }
         
         return sorted;
@@ -514,13 +547,15 @@ public class OracleService {
     // MIGRATION SÉQUENCES
     // ============================================================
 
-    private static void migrateSequences(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
+    private void migrateSequences(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
         System.out.println("\n🔢 MIGRATION DES SÉQUENCES...");
+        log += "\n🔢 MIGRATION DES SÉQUENCES...\n";
         stats.sequencesTotal = db.validSequences.size();
         
         // Afficher d'abord les séquences invalides
         if (db.invalidStats != null && db.invalidStats.invalidSequences > 0) {
             System.out.println("❌ Séquences invalides ignorées: " + db.invalidStats.invalidSequences);
+            log += "❌ Séquences invalides ignorées: " + db.invalidStats.invalidSequences + "\n";
         }
         
         for (String seqName : db.validSequences) {
@@ -571,6 +606,7 @@ public class OracleService {
                             }
                             stats.sequencesSuccess++;
                             System.out.println("✅ Séquence: " + seqName);
+                            log += "✅ Séquence: " + seqName + "\n";
                         }
                     }
                 }
@@ -660,8 +696,9 @@ public class OracleService {
     // MIGRATION TABLES
     // ============================================================
 
-    private static void migrateTables(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
+    private void migrateTables(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
         System.out.println("\n🔨 MIGRATION DES TABLES...");
+        log += "\n🔨 MIGRATION DES TABLES...\n";
         stats.tablesTotal = db.validTables.size();
         stats.pkTotal = db.validTables.size();
         
@@ -676,6 +713,7 @@ public class OracleService {
                     stats.pkSuccess++;
                 }
                 System.out.println("✅ Table: " + table);
+                log += "✅ Table: " + table + "\n";
             } catch (Exception e) {
                 stats.tablesFailed++;
                 stats.failedTables.add(table);
@@ -701,8 +739,9 @@ public class OracleService {
         }
     }
 
-    private static void migrateData(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
+    private void migrateData(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
         System.out.println("\n📦 MIGRATION DES DONNÉES...");
+        log += "\n📦 MIGRATION DES DONNÉES...\n";
         stats.dataTotal = db.validTables.size();
         
         for (String table : db.validTables) {
@@ -718,6 +757,7 @@ public class OracleService {
                 int rowsInserted = insertDataForTable(ora, pg, table, stats);
                 stats.dataSuccess++;
                 System.out.println("✅ Données: " + table + " (" + rowsInserted + " lignes)");
+                log += "✅ Données: " + table + " (" + rowsInserted + " lignes)\n";
             } catch (Exception e) {
                 stats.dataFailed++;
                 stats.failedData.add(table);
@@ -849,8 +889,9 @@ public class OracleService {
     // MIGRATION INDEX
     // ============================================================
 
-    private static void migrateIndexes(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
+    private void migrateIndexes(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
         System.out.println("\n🔍 MIGRATION DES INDEX...");
+        log += "\n🔍 MIGRATION DES INDEX...\n";
         
         for (String table : db.validTables) {
             try (PreparedStatement ps = ora.prepareStatement(
@@ -888,6 +929,7 @@ public class OracleService {
                             }
                             stats.indexSuccess++;
                             System.out.println("✅ Index: " + idxName);
+                            log += "✅ Index: " + idxName + "\n";
                         } catch (Exception ex) {
                             stats.indexFailed++;
                             stats.failedIndexes.put(idxName, ex.getMessage());
@@ -904,8 +946,9 @@ public class OracleService {
     // MIGRATION CONTRAINTES
     // ============================================================
 
-    private static void migrateConstraints(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
+    private void migrateConstraints(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
         System.out.println("\n🔗 MIGRATION DES CONTRAINTES...");
+        log += "\n🔗 MIGRATION DES CONTRAINTES...\n";
         
         // FOREIGN KEYS avec NOT VALID
         try (Statement st = ora.createStatement();
@@ -955,6 +998,7 @@ public class OracleService {
                     }
                     stats.fkSuccess++;
                     System.out.println("✅ FK: " + fkName);
+                    log += "✅ FK: " + fkName + "\n";
                 } catch (Exception e) {
                     stats.fkFailed++;
                     stats.failedFKs.put(fkName, e.getMessage());
@@ -993,6 +1037,7 @@ public class OracleService {
                     }
                     stats.uniqueSuccess++;
                     System.out.println("✅ UNIQUE: " + ukName);
+                    log += "✅ UNIQUE: " + ukName + "\n";
                 } catch (Exception e) {
                     stats.uniqueFailed++;
                     stats.failedUniques.put(ukName, e.getMessage());
@@ -1005,18 +1050,21 @@ public class OracleService {
         }
         
         System.out.println("⚠️  CHECK constraints ignorées (SEARCH_CONDITION type LONG incompatible)");
+        log += "⚠️  CHECK constraints ignorées (SEARCH_CONDITION type LONG incompatible)\n";
     }
 
     // ============================================================
     // MIGRATION VUES
     // ============================================================
 
-    private static void migrateViews(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
+    private void migrateViews(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
         System.out.println("\n👁️  MIGRATION DES VUES...");
+        log += "\n👁️  MIGRATION DES VUES...\n";
         stats.viewsTotal = db.validViews.size();
 
         if (db.invalidStats != null && db.invalidStats.invalidViews > 0) {
             System.out.println("❌ Vues invalides ignorées: " + db.invalidStats.invalidViews);
+            log += "❌ Vues invalides ignorées: " + db.invalidStats.invalidViews + "\n";
         }
 
         List<String> sortedViews = sortViewsByDependencies(db);
@@ -1025,6 +1073,7 @@ public class OracleService {
 
         for (int pass = 1; pass <= maxPasses; pass++) {
             System.out.println("Passe " + pass + "/" + maxPasses + " pour les vues...");
+            log += "Passe " + pass + "/" + maxPasses + " pour les vues...\n";
             int successThisPass = 0;
 
             for (String viewName : sortedViews) {
@@ -1048,6 +1097,7 @@ public class OracleService {
                         stats.viewsSuccess++;
                         successThisPass++;
                         System.out.println("✅ Vue: " + viewName);
+                        log += "✅ Vue: " + viewName + "\n";
                     } catch (Exception e) {
                         String errorMsg = e.getMessage();
                         boolean isDependencyError = errorMsg != null && (
@@ -1057,6 +1107,7 @@ public class OracleService {
 
                         if (isDependencyError && pass < maxPasses) {
                             System.out.println("⏳ Vue en attente (dépendances): " + viewName);
+                            log += "⏳ Vue en attente (dépendances): " + viewName + "\n";
                         } else {
                             stats.viewsFailed++;
                             stats.failedViews.put(viewName, errorMsg);
@@ -1078,6 +1129,7 @@ public class OracleService {
             }
 
             System.out.println("Passe " + pass + ": " + successThisPass + " succès");
+            log += "Passe " + pass + ": " + successThisPass + " succès\n";
             if (migrated.size() >= db.validViews.size() || (successThisPass == 0 && pass > 2)) break;
         }
 
@@ -1091,6 +1143,7 @@ public class OracleService {
 
         // if (!stillFailed.isEmpty()) {
         //     System.out.println("\n🔄 FALLBACK: Tentative avec définitions originales...");
+        //     log += "\n🔄 FALLBACK: Tentative avec définitions originales...\n";
         //     int fallbackSuccess = 0;
 
         //     for (String viewName : stillFailed) {
@@ -1100,6 +1153,7 @@ public class OracleService {
                     
         //             if (fullViewDef == null || fullViewDef.trim().isEmpty()) {
         //                 System.out.println("⚠️  Définition vide pour: " + viewName);
+        //                 log += "⚠️  Définition vide pour: " + viewName + "\n";
         //                 continue;
         //             }
 
@@ -1108,6 +1162,8 @@ public class OracleService {
 
         //             System.out.println("View normal: \n" + fullViewDef);
         //             System.out.println("View IA: \n" + viewIA);
+        //             log += "View normal: \n" + fullViewDef + "\n";
+        //             log += "View IA: \n" + viewIA + "\n";
                     
         //             try (Statement st = pg.createStatement()) {
         //                 st.executeUpdate(viewIA);
@@ -1119,18 +1175,22 @@ public class OracleService {
         //                 fallbackSuccess++;
                         
         //                 System.out.println("🔄 Vue fallback créée: " + viewName);
+        //                 log += "🔄 Vue fallback créée: " + viewName + "\n";
         //                 stats.addError("🔄 VUE FALLBACK " + viewName + ": Créée avec traduction IA");
         //             }
                     
         //         } catch (Exception e) {
         //             System.out.println("❌ Échec fallback pour: " + viewName + " - " + e.getMessage());
+        //             log += "❌ Échec fallback pour: " + viewName + " - " + e.getMessage() + "\n";
         //         }
         //     }
 
         //     System.out.println("Fallback: " + fallbackSuccess + "/" + stillFailed.size() + " vues créées");
+        //     log += "Fallback: " + fallbackSuccess + "/" + stillFailed.size() + " vues créées\n";
         // }
 
         System.out.println("Vues migrées: " + stats.viewsSuccess + "/" + stats.viewsTotal);
+        log += "Vues migrées: " + stats.viewsSuccess + "/" + stats.viewsTotal + "\n";
     }
 
     private static String getFullViewDefinition(Connection ora, String owner, String viewName) throws SQLException {
@@ -1626,13 +1686,15 @@ public class OracleService {
     // MIGRATION FONCTIONS - CORRIGÉE
     // ============================================================
 
-    private static void migrateFunctions(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
+    private void migrateFunctions(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
         System.out.println("\n🧪 MIGRATION DES FONCTIONS...");
+        log += "\n🧪 MIGRATION DES FONCTIONS...\n";
         stats.functionsTotal = db.validFunctions.size();
         
         // Afficher d'abord les fonctions invalides
         if (db.invalidStats != null && db.invalidStats.invalidFunctions > 0) {
             System.out.println("❌ Fonctions invalides ignorées: " + db.invalidStats.invalidFunctions);
+            log += "❌ Fonctions invalides ignorées: " + db.invalidStats.invalidFunctions + "\n";
         }
         
         for (String funcName : db.validFunctions) {
@@ -1668,6 +1730,7 @@ public class OracleService {
                             st.executeUpdate(simpleFunction);
                             stats.functionsSuccess++;
                             System.out.println("✅ Fonction (séquence simple): " + funcName);
+                            log += "✅ Fonction (séquence simple): " + funcName + "\n";
                             continue;
                         } catch (Exception e) {
                             // Continuer avec la méthode normale
@@ -1682,6 +1745,7 @@ public class OracleService {
                         st.executeUpdate(pgFunction);
                         stats.functionsSuccess++;
                         System.out.println("✅ Fonction: " + funcName);
+                        log += "✅ Fonction: " + funcName + "\n";
                     } catch (Exception e) {
                         // Essayer une version encore plus simple
                         String minimalFunction = createMinimalFunction(funcName);
@@ -1690,6 +1754,7 @@ public class OracleService {
                                 st.executeUpdate(minimalFunction);
                                 stats.functionsSuccess++;
                                 System.out.println("✅ Fonction (version minimale): " + funcName);
+                                log += "✅ Fonction (version minimale): " + funcName + "\n";
                             } catch (Exception e2) {
                                 throw e; // Relancer l'exception originale
                             }
@@ -1705,6 +1770,7 @@ public class OracleService {
                             st.executeUpdate(minimalFunction);
                             stats.functionsSuccess++;
                             System.out.println("✅ Fonction (version minimale par défaut): " + funcName);
+                            log += "✅ Fonction (version minimale par défaut): " + funcName + "\n";
                         } catch (Exception e) {
                             stats.functionsFailed++;
                             stats.failedFunctions.put(funcName, "Conversion échouée: " + e.getMessage());
@@ -1802,13 +1868,15 @@ public class OracleService {
     // MIGRATION TRIGGERS - CORRIGÉE
     // ============================================================
 
-    private static void migrateTriggers(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
+    private void migrateTriggers(Connection ora, Connection pg, DatabaseObjects db, MigrationStats stats) {
         System.out.println("\n⚡ MIGRATION DES TRIGGERS...");
+        log += "\n⚡ MIGRATION DES TRIGGERS...\n";
         stats.triggersTotal = db.validTriggers.size();
         
         // Afficher d'abord les triggers invalides
         if (db.invalidStats != null && db.invalidStats.invalidTriggers > 0) {
             System.out.println("❌ Triggers invalides ignorés: " + db.invalidStats.invalidTriggers);
+            log += "❌ Triggers invalides ignorés: " + db.invalidStats.invalidTriggers + "\n";
         }
         
         for (String trigName : db.validTriggers) {
@@ -1843,6 +1911,7 @@ public class OracleService {
                             st.executeUpdate(minimalTrigger);
                             stats.triggersSuccess++;
                             System.out.println("✅ Trigger (version basique): " + trigName);
+                            log += "✅ Trigger (version basique): " + trigName + "\n";
                         } catch (Exception e) {
                             stats.triggersFailed++;
                             stats.failedTriggers.put(trigName, "Échec création trigger basique: " + e.getMessage());
@@ -1863,6 +1932,7 @@ public class OracleService {
                             st.executeUpdate(pgTrigger);
                             stats.triggersSuccess++;
                             System.out.println("✅ Trigger: " + trigName + " sur table " + tableName);
+                            log += "✅ Trigger: " + trigName + " sur table " + tableName + "\n";
                         } catch (Exception e) {
                             stats.triggersFailed++;
                             stats.failedTriggers.put(trigName, "Échec création trigger: " + e.getMessage());
@@ -1929,10 +1999,13 @@ public class OracleService {
     // FONCTION PRINCIPALE AMÉLIORÉE
     // ============================================================
 
-    public static MigrationStats migrateCompleteDatabase(Oracle oracle, PostgreSQL postgres) {
+    public MigrationStats migrateCompleteDatabase(Oracle oracle, PostgreSQL postgres) {
         System.out.println("\n" + "=".repeat(80));
         System.out.println("=== MIGRATION ORACLE → POSTGRESQL COMPLÈTE ===");
         System.out.println("=".repeat(80));
+        log += "\n" + "=".repeat(80) + "\n";
+        log += "=== MIGRATION ORACLE → POSTGRESQL COMPLÈTE ===\n";
+        log += "=".repeat(80) + "\n";
         
         long start = System.currentTimeMillis();
         MigrationStats stats = new MigrationStats();
@@ -1941,6 +2014,7 @@ public class OracleService {
              Connection pgConn = PostgresService.PostgresConnexion(postgres)) {
             
             System.out.println("✅ Connexions établies");
+            log += "✅ Connexions établies\n";
             
             DatabaseObjects db = validateOracleObjects(oraConn);
             analyzeViewDependencies(oraConn, db, stats);
@@ -1985,6 +2059,7 @@ public class OracleService {
             
             long duration = (System.currentTimeMillis() - start) / 1000;
             System.out.println("\n✅ Migration terminée en " + duration + "s");
+            log += "\n✅ Migration terminée en " + duration + "s\n";
             
             // Toujours afficher les statistiques
             stats.tablesFailed = stats.tablesTotal - stats.tablesSuccess;
@@ -2004,12 +2079,14 @@ public class OracleService {
         } catch (Exception e) {
             System.err.println("\n❌ ERREUR CRITIQUE: " + e.getMessage());
             e.printStackTrace();
+            log += "\n❌ ERREUR CRITIQUE: " + e.getMessage() + "\n";
             stats.addError("❌ ERREUR CRITIQUE: " + e.getMessage());
             
             // Afficher ce qui a été collecté malgré l'erreur
             stats.printDetailed();
             stats.printAllErrorsDetailed();
         }
+        stats.logs = log;
         return stats;
     }
 
@@ -2056,7 +2133,7 @@ public class OracleService {
         }
     }
 
-    public static void migrationTablesAndDataOracleToPostgresql(Oracle oracle, PostgreSQL postgres) {
+    public void migrationTablesAndDataOracleToPostgresql(Oracle oracle, PostgreSQL postgres) {
         migrateCompleteDatabase(oracle, postgres);
     }
 }

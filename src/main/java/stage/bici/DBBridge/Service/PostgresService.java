@@ -7,8 +7,14 @@ import java.math.BigDecimal;
 import stage.bici.DBBridge.Model.DonneeTablePostgres;
 import stage.bici.DBBridge.Model.Oracle;
 import stage.bici.DBBridge.Model.PostgreSQL;
+import stage.bici.DBBridge.TestIA.SqlViewTranslator;
 
 public class PostgresService {
+
+    public String log;
+    public PostgresService() {
+        this.log = "";
+    }
     
     // ============================================================
     // MOTS-CLÉS ORACLE RÉSERVÉS
@@ -182,8 +188,9 @@ public class PostgresService {
     // VALIDATION OBJETS POSTGRESQL
     // ============================================================
 
-    private static PostgresDatabaseObjects validatePostgresObjects(Connection pg) throws SQLException {
+    private PostgresDatabaseObjects validatePostgresObjects(Connection pg) throws SQLException {
         System.out.println("\n🔍 VALIDATION DES OBJETS POSTGRESQL...");
+        log += "\n🔍 VALIDATION DES OBJETS POSTGRESQL...\n";
         PostgresDatabaseObjects db = new PostgresDatabaseObjects();
         
         // Tables
@@ -194,6 +201,7 @@ public class PostgresService {
             }
         }
         System.out.println("✅ Tables trouvées: " + db.validTables.size());
+        log += "✅ Tables trouvées: " + db.validTables.size() + "\n";
         
         // Séquences
         try (Statement st = pg.createStatement();
@@ -203,6 +211,7 @@ public class PostgresService {
             }
         }
         System.out.println("✅ Séquences trouvées: " + db.validSequences.size());
+        log += "✅ Séquences trouvées: " + db.validSequences.size() + "\n";
         
         // Vues avec définitions
         try (Statement st = pg.createStatement();
@@ -215,6 +224,7 @@ public class PostgresService {
             }
         }
         System.out.println("✅ Vues trouvées: " + db.validViews.size());
+        log += "✅ Vues trouvées: " + db.validViews.size() + "\n";
         
         // Fonctions
         try (Statement st = pg.createStatement();
@@ -229,6 +239,7 @@ public class PostgresService {
             }
         }
         System.out.println("✅ Fonctions trouvées: " + db.validFunctions.size());
+        log += "✅ Fonctions trouvées: " + db.validFunctions.size() + "\n";
         
         // Triggers
         try (Statement st = pg.createStatement();
@@ -239,6 +250,7 @@ public class PostgresService {
             }
         }
         System.out.println("✅ Triggers trouvés: " + db.validTriggers.size());
+        log += "✅ Triggers trouvés: " + db.validTriggers.size() + "\n";
         
         return db;
     }
@@ -247,8 +259,9 @@ public class PostgresService {
     // ANALYSE DES DÉPENDANCES DES VUES
     // ============================================================
 
-    private static void analyzeViewDependencies(Connection pg, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
+    private void analyzeViewDependencies(Connection pg, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         System.out.println("\n🔍 ANALYSE DES DÉPENDANCES DES VUES...");
+        log += "\n🔍 ANALYSE DES DÉPENDANCES DES VUES...\n";
         
         Map<String, Set<String>> viewDependencies = new HashMap<>();
         Map<String, Set<String>> missingDependencies = new HashMap<>();
@@ -300,8 +313,9 @@ public class PostgresService {
     // TRI TOPOLOGIQUE DES VUES
     // ============================================================
 
-    private static List<String> sortViewsByDependencies(PostgresDatabaseObjects db) {
+    private List<String> sortViewsByDependencies(PostgresDatabaseObjects db) {
         System.out.println("\n🔄 TRI TOPOLOGIQUE DES VUES...");
+        log += "\n🔄 TRI TOPOLOGIQUE DES VUES...\n";
         
         Map<String, Set<String>> dependencies = new HashMap<>();
         for (String viewName : db.validViews) {
@@ -325,6 +339,7 @@ public class PostgresService {
         }
         
         System.out.println("✅ Vues triées par dépendances: " + sorted.size());
+        log += "✅ Vues triées par dépendances: " + sorted.size() + "\n";
         return sorted;
     }
 
@@ -353,8 +368,9 @@ public class PostgresService {
     // 1. MIGRATION DES SÉQUENCES
     // ============================================================
     
-    private static void migrateSequences(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
+    private void migrateSequences(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         System.out.println("\n🔢 MIGRATION DES SÉQUENCES...");
+        log += "\n🔢 MIGRATION DES SÉQUENCES...\n";
         stats.sequencesTotal = db.validSequences.size();
         
         for (String seq : db.validSequences) {
@@ -388,6 +404,7 @@ public class PostgresService {
                         }
                         stats.sequencesSuccess++;
                         System.out.println("✅ Séquence: " + seq);
+                        log += "✅ Séquence: " + seq + "\n";
                     }
                 }
             } catch (Exception e) {
@@ -523,8 +540,9 @@ public class PostgresService {
         return sb.toString();
     }
 
-    private static void migrateTables(PostgreSQL postgres, Oracle oracle, PostgresDatabaseObjects db, PostgresMigrationStats stats) throws SQLException {
+    private void migrateTables(PostgreSQL postgres, Oracle oracle, PostgresDatabaseObjects db, PostgresMigrationStats stats) throws SQLException {
         System.out.println("\n🔨 MIGRATION DES TABLES...");
+        log += "\n🔨 MIGRATION DES TABLES...\n";
         stats.tablesTotal = db.validTables.size();
         stats.pkTotal = db.validTables.size();
         
@@ -538,10 +556,12 @@ public class PostgresService {
                     stats.tablesSuccess++;
                     stats.pkSuccess++;
                     System.out.println("✅ Table: " + table);
+                    log += "✅ Table: " + table + "\n";
                 } catch (Exception e) {
                     // SECONDE TENTATIVE : Version simplifiée
                     try {
                         System.out.println("⚠️  Première tentative échouée pour " + table + ", seconde tentative...");
+                        log += "⚠️  Première tentative échouée pour " + table + ", seconde tentative...\n";
                         String simpleSQL = generateSimpleTableSQL(postgres, table);
                         try (Statement stmt = oraConn.createStatement()) {
                             stmt.executeUpdate(simpleSQL);
@@ -549,6 +569,7 @@ public class PostgresService {
                         stats.tablesSuccess++;
                         stats.pkSuccess++;
                         System.out.println("✅ Table (seconde tentative): " + table);
+                        log += "✅ Table (seconde tentative): " + table + "\n";
                     } catch (Exception e2) {
                         stats.tablesFailed++;
                         stats.failedTables.add(table);
@@ -588,8 +609,9 @@ public class PostgresService {
     // 3. MIGRATION DES DONNÉES
     // ============================================================
 
-    private static void migrateData(PostgreSQL postgres, Oracle oracle, PostgresDatabaseObjects db, PostgresMigrationStats stats) throws SQLException {
+    private void migrateData(PostgreSQL postgres, Oracle oracle, PostgresDatabaseObjects db, PostgresMigrationStats stats) throws SQLException {
         System.out.println("\n📦 MIGRATION DES DONNÉES...");
+        log += "\n📦 MIGRATION DES DONNÉES...\n";
         stats.dataTotal = db.validTables.size();
         
         try (Connection oraConn = OracleService.OracleConnexion(oracle)) {
@@ -599,6 +621,7 @@ public class PostgresService {
                     insertDataWithConnection(postgres, oraConn, table, tableNameOracle, stats);
                     stats.dataSuccess++;
                     System.out.println("✅ Données: " + table);
+                    log += "✅ Données: " + table + "\n";
                 } catch (Exception e) {
                     stats.dataFailed++;
                     stats.failedData.add(table);
@@ -609,7 +632,7 @@ public class PostgresService {
         }
     }
 
-    private static void insertDataWithConnection(PostgreSQL postgreSQL, Connection oracleConn, 
+    private  void insertDataWithConnection(PostgreSQL postgreSQL, Connection oracleConn, 
                                                String tableNamePg, String tableNameOracle, PostgresMigrationStats stats) throws SQLException {
         try (Connection pgConn = PostgresConnexion(postgreSQL);
              Statement st = pgConn.createStatement();
@@ -708,6 +731,7 @@ public class PostgresService {
                 
                 if (skipped > 0) {
                     System.out.println("   ⚠️ " + skipped + " lignes ignorées (doublons)");
+                    log += "   ⚠️ " + skipped + " lignes ignorées (doublons)\n";
                 }
                 
                 oracleConn.setAutoCommit(true);
@@ -719,8 +743,9 @@ public class PostgresService {
     // 4. MIGRATION DES INDEX
     // ============================================================
     
-    private static void migrateIndexes(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
+    private void migrateIndexes(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         System.out.println("\n🔍 MIGRATION DES INDEX...");
+        log += "\n🔍 MIGRATION DES INDEX...\n";
         
         for (String table : db.validTables) {
             try (PreparedStatement ps = pg.prepareStatement(
@@ -741,6 +766,7 @@ public class PostgresService {
                                 }
                                 stats.indexSuccess++;
                                 System.out.println("✅ Index: " + idx);
+                                log += "✅ Index: " + idx + "\n";
                             }
                         } catch (Exception e) {
                             stats.indexFailed++;
@@ -787,8 +813,9 @@ public class PostgresService {
     // 5. MIGRATION DES CONTRAINTES FK ET UNIQUE
     // ============================================================
     
-    private static void migrateConstraints(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
+    private void migrateConstraints(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         System.out.println("\n🔗 MIGRATION DES CONTRAINTES...");
+        log += "\n🔗 MIGRATION DES CONTRAINTES...\n";
         
         // FOREIGN KEYS
         try (Statement st = pg.createStatement();
@@ -839,6 +866,7 @@ public class PostgresService {
                     }
                     stats.fkSuccess++;
                     System.out.println("✅ FK: " + fkName);
+                    log += "✅ FK: " + fkName + "\n";
                 } catch (Exception e) {
                     stats.fkFailed++;
                     stats.failedFKs.put(fkName, e.getMessage());
@@ -881,6 +909,7 @@ public class PostgresService {
                     }
                     stats.uniqueSuccess++;
                     System.out.println("✅ UNIQUE: " + ukName);
+                    log += "✅ UNIQUE: " + ukName + "\n";
                 } catch (Exception e) {
                     stats.uniqueFailed++;
                     stats.failedUniques.put(ukName, e.getMessage());
@@ -909,8 +938,9 @@ public class PostgresService {
     // 6. MIGRATION DES FONCTIONS - OPTIMISÉE SANS CRÉATION PAR DÉFAUT
     // ============================================================
     
-    private static void migrateFunctions(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
+    private void migrateFunctions(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         System.out.println("\n🧪 MIGRATION DES FONCTIONS...");
+        log += "\n🧪 MIGRATION DES FONCTIONS...\n";
         stats.functionsTotal = db.validFunctions.size();
         
         for (String func : db.validFunctions) {
@@ -941,6 +971,7 @@ public class PostgresService {
                     }
                     stats.functionsSuccess++;
                     System.out.println("✅ Fonction: " + func);
+                    log += "✅ Fonction: " + func + "\n";
                 } else {
                     // NE PAS CRÉER D'OBJET PAR DÉFAUT
                     stats.functionsFailed++;
@@ -1013,8 +1044,9 @@ public class PostgresService {
     // 7. MIGRATION DES TRIGGERS - OPTIMISÉE SANS CRÉATION PAR DÉFAUT
     // ============================================================
     
-    private static void migrateTriggers(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
+    private void migrateTriggers(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         System.out.println("\n⚡ MIGRATION DES TRIGGERS...");
+        log += "\n⚡ MIGRATION DES TRIGGERS...\n";
         stats.triggersTotal = db.validTriggers.size();
         
         for (String trg : db.validTriggers) {
@@ -1052,6 +1084,7 @@ public class PostgresService {
                     }
                     stats.triggersSuccess++;
                     System.out.println("✅ Trigger: " + trg);
+                    log += "✅ Trigger: " + trg + "\n";
                 } else {
                     // NE PAS CRÉER D'OBJET PAR DÉFAUT
                     stats.triggersFailed++;
@@ -1095,12 +1128,14 @@ public class PostgresService {
 // 8. MIGRATION DES VUES - VERSION ULTRA-OPTIMISÉE (90%+ réussite)
 // ============================================================
 
-private static void migrateViews(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
+private void migrateViews(Connection pg, Connection ora, PostgresDatabaseObjects db, PostgresMigrationStats stats) {
     System.out.println("\n👁️  MIGRATION DES VUES...");
+    log += "\n👁️  MIGRATION DES VUES...\n";
     stats.viewsTotal = db.validViews.size();
     
     List<String> sortedViews = sortViewsByDependencies(db);
     System.out.println("Vues à migrer après tri: " + sortedViews.size());
+    log += "Vues à migrer après tri: " + sortedViews.size() + "\n";
     
     Set<String> migrated = new HashSet<>();
     Map<String, String> failureReasons = new HashMap<>();
@@ -1108,6 +1143,7 @@ private static void migrateViews(Connection pg, Connection ora, PostgresDatabase
     
     for (int pass = 1; pass <= maxPasses; pass++) {
         System.out.println("\n--- Passe " + pass + "/" + maxPasses + " ---");
+        log += "\n--- Passe " + pass + "/" + maxPasses + " ---\n";
         int successThisPass = 0;
         int failedThisPass = 0;
         
@@ -1122,6 +1158,7 @@ private static void migrateViews(Connection pg, Connection ora, PostgresDatabase
                     migrated.add(view);
                     failedThisPass++;
                     System.out.println("❌ Vue " + view + ": définition vide");
+                    log += "❌ Vue " + view + ": définition vide\n";
                     continue;
                 }
                 
@@ -1136,34 +1173,127 @@ private static void migrateViews(Connection pg, Connection ora, PostgresDatabase
                 stats.viewsSuccess++;
                 successThisPass++;
                 System.out.println("✅ Vue: " + view);
+                log += "✅ Vue: " + view + "\n";
                 
             } catch (Exception e) {
                 String errorMsg = e.getMessage();
                 failureReasons.put(view, errorMsg);
                 
-                if (pass == maxPasses) {
+                boolean isDependencyError = errorMsg != null && (
+                    errorMsg.toLowerCase().contains("does not exist") ||
+                    errorMsg.toLowerCase().contains("n'existe pas") ||
+                    errorMsg.toLowerCase().contains("not found")
+                );
+                
+                if (isDependencyError && pass < maxPasses) {
+                    System.out.println("⏳ Vue en attente (dépendances): " + view);
+                    log += "⏳ Vue en attente (dépendances): " + view + "\n";
+                } else if (pass == maxPasses) {
                     stats.viewsFailed++;
                     stats.failedViews.put(view, errorMsg);
                     stats.addErrorSummary(PostgresMigrationStats.classifyError(errorMsg), view);
                     migrated.add(view);
                     failedThisPass++;
                     System.out.println("❌ Vue " + view + ": " + errorMsg.substring(0, Math.min(100, errorMsg.length())));
+                    log += "❌ Vue " + view + ": " + errorMsg.substring(0, Math.min(100, errorMsg.length())) + "\n";
                 } else {
                     System.out.println("⚠️  Vue " + view + " échouée (passe " + pass + "), réessai...");
+                    log += "⚠️  Vue " + view + " échouée (passe " + pass + "), réessai...\n";
                 }
             }
         }
         
         System.out.println("Passe " + pass + ": " + successThisPass + " succès, " + failedThisPass + " échecs");
+        log += "Passe " + pass + ": " + successThisPass + " succès, " + failedThisPass + " échecs\n";
         System.out.println("Total migrées: " + migrated.size() + "/" + db.validViews.size());
+        log += "Total migrées: " + migrated.size() + "/" + db.validViews.size() + "\n";
         
         if (migrated.size() >= db.validViews.size()) break;
-        if (successThisPass == 0 && failedThisPass == 0) break;
+        if (successThisPass == 0 && pass > 2) break;
     }
+    
+    // ===== FALLBACK : Tentative avec la définition complète PostgreSQL et traduction IA =====
+    // List<String> stillFailed = new ArrayList<>();
+    // for (String viewName : sortedViews) {
+    //     if (stats.failedViews.containsKey(viewName)) {
+    //         stillFailed.add(viewName);
+    //     }
+    // }
+
+    // if (!stillFailed.isEmpty()) {
+    //     System.out.println("\n🔄 FALLBACK: Tentative avec définitions originales et traduction IA...");
+    //     log += "\n🔄 FALLBACK: Tentative avec définitions originales et traduction IA...\n";
+    //     int fallbackSuccess = 0;
+
+    //     for (String viewName : stillFailed) {
+    //         try {
+    //             String fullViewDef = getFullViewDefinitionFromPostgres(pg, "schema", viewName);
+                
+    //             if (fullViewDef == null || fullViewDef.trim().isEmpty()) {
+    //                 System.out.println("⚠️  Définition vide pour: " + viewName);
+    //                 log += "⚠️  Définition vide pour: " + viewName + "\n";
+    //                 continue;
+    //             }
+
+    //             // Traduire la vue PostgreSQL vers Oracle avec l'IA
+    //             String viewIA = SqlViewTranslator.translatePostgresToOracle(fullViewDef);
+
+    //             System.out.println("View PostgreSQL originale: \n" + fullViewDef);
+    //             System.out.println("View Oracle traduite (IA): \n" + viewIA);
+    //             log += "View PostgreSQL originale: \n" + fullViewDef + "\n";
+    //             log += "View Oracle traduite (IA): \n" + viewIA + "\n";
+                
+    //             try (Statement st = ora.createStatement()) {
+    //                 st.executeUpdate(viewIA);
+                    
+    //                 // Mise à jour des stats
+    //                 stats.viewsFailed--;
+    //                 stats.viewsSuccess++;
+    //                 stats.failedViews.remove(viewName);
+    //                 fallbackSuccess++;
+                    
+    //                 System.out.println("🔄 Vue fallback créée: " + viewName);
+    //                 log += "🔄 Vue fallback créée: " + viewName + "\n";
+    //                 stats.addError("🔄 VUE FALLBACK " + viewName + ": Créée avec traduction IA");
+    //             }
+                
+    //         } catch (Exception e) {
+    //             System.out.println("❌ Échec fallback pour: " + viewName + " - " + e.getMessage());
+    //             log += "❌ Échec fallback pour: " + viewName + " - " + e.getMessage() + "\n";
+    //         }
+    //     }
+
+    //     System.out.println("Fallback: " + fallbackSuccess + "/" + stillFailed.size() + " vues créées");
+    //     log += "Fallback: " + fallbackSuccess + "/" + stillFailed.size() + " vues créées\n";
+    // }
     
     double viewMigrationRate = (double) stats.viewsSuccess / stats.viewsTotal * 100;
     System.out.println(String.format("\n🎯 Taux de migration des vues: %.1f%% (%d/%d)", 
                                      viewMigrationRate, stats.viewsSuccess, stats.viewsTotal));
+    log += String.format("\n🎯 Taux de migration des vues: %.1f%% (%d/%d)\n", 
+                        viewMigrationRate, stats.viewsSuccess, stats.viewsTotal);
+}
+
+// Méthode helper pour récupérer la définition complète d'une vue depuis PostgreSQL
+private static String getFullViewDefinitionFromPostgres(Connection pg, String pu, String viewName) throws SQLException {
+    String query = "SELECT pg_get_viewdef(c.oid, true) AS definition " +
+                   "FROM pg_class c " +
+                   "JOIN pg_namespace n ON n.oid = c.relnamespace " +
+                   "WHERE c.relkind = 'v' " +
+                   "AND n.nspname = ? " +
+                   "AND c.relname = ?";
+    
+    try (PreparedStatement ps = pg.prepareStatement(query)) {
+        ps.setString(1, "public");
+        ps.setString(2, viewName);
+        
+        try (ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) {
+                return rs.getString("definition");
+            }
+        }
+    }
+    return null;
 }
 
 // ============================================================
@@ -1356,10 +1486,13 @@ private static String handleTruncatedNames(String sql, PostgresDatabaseObjects d
     // FONCTION PRINCIPALE OPTIMISÉE
     // ============================================================
 
-    public static PostgresMigrationStats migrateCompleteDatabase(PostgreSQL postgres, Oracle oracle) {
+    public PostgresMigrationStats migrateCompleteDatabase(PostgreSQL postgres, Oracle oracle) {
         System.out.println("\n" + "=".repeat(80));
         System.out.println("=== MIGRATION POSTGRESQL → ORACLE OPTIMISÉE ===");
         System.out.println("=".repeat(80));
+        log += "\n" + "=".repeat(80) + "\n";
+        log += "=== MIGRATION POSTGRESQL → ORACLE OPTIMISÉE ===\n";
+        log += "=".repeat(80) + "\n";
         
         long start = System.currentTimeMillis();
         PostgresMigrationStats stats = new PostgresMigrationStats();
@@ -1368,6 +1501,7 @@ private static String handleTruncatedNames(String sql, PostgresDatabaseObjects d
              Connection oraConn = OracleService.OracleConnexion(oracle)) {
             
             System.out.println("✅ Connexions établies");
+            log += "✅ Connexions établies\n";
             
             PostgresDatabaseObjects db = validatePostgresObjects(pgConn);
             analyzeViewDependencies(pgConn, db, stats);
@@ -1377,18 +1511,21 @@ private static String handleTruncatedNames(String sql, PostgresDatabaseObjects d
             
             long duration = (System.currentTimeMillis() - start) / 1000;
             System.out.println("\n✅ Migration terminée en " + duration + "s");
+            log += "\n✅ Migration terminée en " + duration + "s\n";
             
             stats.printDetailed();
             
         } catch (Exception e) {
             System.err.println("\n❌ ERREUR CRITIQUE: " + e.getMessage());
+            log += "\n❌ ERREUR CRITIQUE: " + e.getMessage() + "\n";
             stats.addError("❌ ERREUR CRITIQUE: " + e.getMessage());
             stats.printDetailed();
         }
+        stats.logs = log;
         return stats;
     }
 
-    private static void migrateOptimized(Connection pg, Connection ora, PostgreSQL postgres, Oracle oracle, 
+    private void migrateOptimized(Connection pg, Connection ora, PostgreSQL postgres, Oracle oracle, 
                                        PostgresDatabaseObjects db, PostgresMigrationStats stats) {
         // 1. Séquences
         try { migrateSequences(pg, ora, db, stats); } catch (Exception e) {
@@ -1442,14 +1579,14 @@ private static String handleTruncatedNames(String sql, PostgresDatabaseObjects d
         }
     }
 
-    public static void insertDataIntoOracle(PostgreSQL postgreSQL, Oracle oracle, String tableName) throws SQLException {
+    public void insertDataIntoOracle(PostgreSQL postgreSQL, Oracle oracle, String tableName) throws SQLException {
         try (Connection oracleConn = OracleService.OracleConnexion(oracle)) {
             PostgresMigrationStats dummyStats = new PostgresMigrationStats();
-            insertDataWithConnection(postgreSQL, oracleConn, tableName, tableName, dummyStats);
+            this.insertDataWithConnection(postgreSQL, oracleConn, tableName, tableName, dummyStats);
         }
     }
 
-    public static void migrationTablesAndDataPostgresToOracle(Oracle oracle, PostgreSQL postgres) {
+    public void migrationTablesAndDataPostgresToOracle(Oracle oracle, PostgreSQL postgres) {
         migrateCompleteDatabase(postgres, oracle);
     }
 }

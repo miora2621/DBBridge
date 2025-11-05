@@ -91,7 +91,8 @@ public class MigrationController {
 
         Map<String,Integer[]> statistiques = new HashMap<>();
         if (typeMigration==1){
-            MigrationStats stats = OracleService.migrateCompleteDatabase(oracle, postgreSQL);
+            OracleService oracleService = new OracleService();
+            MigrationStats stats = oracleService.migrateCompleteDatabase(oracle, postgreSQL);
             /* le indice 0 : Total */
             /* le indice 1 : Succes */
             /* le indice 2 : Echec */
@@ -102,7 +103,8 @@ public class MigrationController {
         }
         if (typeMigration==2){
             /* Void le izy de ts nataoko */
-            PostgresMigrationStats stats = PostgresService.migrateCompleteDatabase(postgreSQL,oracle);
+            PostgresService postgresMigrationStats = new PostgresService();
+            PostgresMigrationStats stats = postgresMigrationStats.migrateCompleteDatabase(postgreSQL,oracle);
             /* le indice 0 : Total */
             /* le indice 1 : Succes */
             /* le indice 2 : Echec */

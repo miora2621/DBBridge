@@ -104,7 +104,7 @@ public class OracleController {
         try {
             // String script = OracleService.generateCreateTableSQL(oracle, "menudynamique");
             // OracleService.createPostgresTable(postgreSQL, script);
-            OracleService.migrationTablesAndDataOracleToPostgresql(oracle, postgreSQL);
+            // OracleService.migrationTablesAndDataOracleToPostgresql(oracle, postgreSQL);
         } catch (Exception e) {
             e.printStackTrace();    
         }
@@ -116,7 +116,8 @@ public class OracleController {
         Oracle oracle = session.getAttribute("dbOracle") != null ? (Oracle) session.getAttribute("dbOracle") : null;
         PostgreSQL postgreSQL = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
         try {
-            MigrationStats stats = OracleService.migrateCompleteDatabase(oracle, postgreSQL);
+            OracleService oracleService = new OracleService();
+            MigrationStats stats = oracleService.migrateCompleteDatabase(oracle, postgreSQL);
         } catch (Exception e) {
             e.printStackTrace();    
         }
@@ -128,7 +129,8 @@ public class OracleController {
         Oracle oracle = session.getAttribute("dbOracle") != null ? (Oracle) session.getAttribute("dbOracle") : null;
         PostgreSQL postgreSQL = session.getAttribute("dbPostgres") != null ? (PostgreSQL) session.getAttribute("dbPostgres") : null;
         try {
-           PostgresMigrationStats stats = PostgresService.migrateCompleteDatabase(postgreSQL,oracle);
+           PostgresService postgresMigrationStats = new PostgresService();
+           PostgresMigrationStats stats = postgresMigrationStats.migrateCompleteDatabase(postgreSQL,oracle);
         } catch (Exception e) {
             e.printStackTrace();    
         }

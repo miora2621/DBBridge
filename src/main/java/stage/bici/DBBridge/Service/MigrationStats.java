@@ -21,6 +21,7 @@ public class MigrationStats {
     public int viewsTotal, viewsSuccess, viewsFailed;
     public int functionsTotal, functionsSuccess, functionsFailed;
     public int triggersTotal, triggersSuccess, triggersFailed;
+    public String logs;
     
     public List<String> failedTables = new ArrayList<>();
     public List<String> failedData = new ArrayList<>();

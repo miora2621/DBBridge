@@ -17,6 +17,7 @@ public class PostgresMigrationStats {
     public int uniqueTotal, uniqueSuccess, uniqueFailed;
     public int indexTotal, indexSuccess, indexFailed;
     public int triggersTotal, triggersSuccess, triggersFailed;
+    public String logs;
     
     public List<String> failedTables = new ArrayList<>();
     public List<String> failedData = new ArrayList<>();
