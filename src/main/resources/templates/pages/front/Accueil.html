@@ -20,21 +20,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" th:href="@{/assets/bundles/izitoast/css/iziToast.min.css}">
     <style>
-        /* HTML: <div class="loader"></div> */
-        /*.loader_factory {*/
-        /*    height: 10px;*/
-        /*    width: 100%;*/
-        /*    --c:no-repeat linear-gradient(#00ee5f 0 0);*/
-        /*    background: var(--c),var(--c), #b8fcb9;*/
-        /*    background-size: 60% 100%;*/
-        /*    animation: l16 3s infinite;*/
-        /*}*/
-        /*@keyframes l16 {*/
-        /*    0%   {background-position:-150% 0,-150% 0}*/
-        /*    66%  {background-position: 250% 0,-150% 0}*/
-        /*    100% {background-position: 250% 0, 250% 0}*/
-        /*}*/
-
         .loader_factory {
             width: 100px;
             aspect-ratio: 1;
@@ -60,6 +45,49 @@
         @keyframes l15{
             100%{transform: rotate(1turn)}
         }
+
+        .terminal {
+            width: 100%;
+            overflow-y: auto;
+            overflow-x: auto;
+            height: 600px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: .25rem;
+            padding: 15px;
+            white-space: pre-wrap;
+            line-height: 1.4;
+            margin-bottom: 10px;
+        }
+
+        .terminal::-webkit-scrollbar{
+            width: 10px;
+        }
+
+        .terminal::-webkit-scrollbar-track{
+            background: rgba(25, 25, 25, 0.79);
+        }
+
+        .terminal::-webkit-scrollbar-thumb{
+            background: rgba(255, 255, 255, 0.56);
+        }
+
+        .terminal::-webkit-scrollbar-thumb:hover{
+            background: rgba(255, 255, 255, 0.89);
+        }
+
+        .cursor {
+            display: inline-block;
+            width: 10px;
+            height: 1em;
+            background: #c9d1d9;
+            margin-left: 2px;
+            animation: blink 1s steps(2, start) infinite;
+            vertical-align: bottom;
+        }
+
+        @keyframes blink { 50% { opacity: 0; } }
+
     </style>
 </head>
 <body>
@@ -246,24 +274,7 @@
                                                 <div class="jumbotron" style="padding: 1rem 1rem">
                                                     <div id="dashboard" style="display: none">
                                                         <div class="row">
-                                                            <div class="col-xl-3 col-lg-6">
-                                                                <div class="card">
-                                                                    <div class="card-body card-type-3">
-                                                                        <div class="row">
-                                                                            <div class="col">
-                                                                                <h6 class="text-muted mb-0">Taux de r&eacute;ussite</h6>
-                                                                                <span class="font-weight-bold mb-0" id="tauxStat">0%</span>
-                                                                            </div>
-                                                                            <div class="col-auto">
-                                                                                <div class="card-circle l-bg-red text-white">
-                                                                                    <i class="fas fa-percent"></i>
-                                                                                </div>
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                            <div class="col-xl-3 col-lg-6">
+                                                            <div class="col-xl-4 col-lg-6">
                                                                 <div class="card">
                                                                     <div class="card-body card-type-3">
                                                                         <div class="row">
@@ -280,7 +291,7 @@
                                                                     </div>
                                                                 </div>
                                                             </div>
-                                                            <div class="col-xl-3 col-lg-6">
+                                                            <div class="col-xl-4 col-lg-6">
                                                                 <div class="card">
                                                                     <div class="card-body card-type-3">
                                                                         <div class="row">
@@ -297,7 +308,7 @@
                                                                     </div>
                                                                 </div>
                                                             </div>
-                                                            <div class="col-xl-3 col-lg-6">
+                                                            <div class="col-xl-4 col-lg-6">
                                                                 <div class="card">
                                                                     <div class="card-body card-type-3">
                                                                         <div class="row">
@@ -314,26 +325,39 @@
                                                                     </div>
                                                                 </div>
                                                             </div>
-
                                                         </div>
-                                                        <div class="card">
-                                                            <div class="card-header">
-                                                                <h4>Statistiques</h4>
+                                                        <div class="row align-items-lg-stretch">
+                                                            <div class="col-12 col-md-6 col-lg-8 d-flex">
+                                                                <div class="card flex-fill">
+                                                                    <div class="card-header">
+                                                                        <h4>Statistiques</h4>
+                                                                    </div>
+                                                                    <div class="card-body">
+                                                                        <div id="chart2" class="chartsh"></div>
+                                                                    </div>
+                                                                </div>
                                                             </div>
-                                                            <div class="card-body">
-                                                                <div id="chart2" class="chartsh"></div>
+                                                            <div class="col-12 col-md-6 col-lg-4 d-flex">
+                                                                <div class="card flex-fill">
+                                                                    <div class="card-header">
+                                                                        <h4>Taux de r&eacute;ussite en %</h4>
+                                                                    </div>
+                                                                    <div class="card-body">
+                                                                        <canvas id="myChart3"></canvas>
+                                                                    </div>
+                                                                </div>
                                                             </div>
                                                         </div>
-                                                        <a th:href="@{/home}" class="btn btn-primary w-100">Reinitialiser</a>
+                                                        <div style="display: flex;gap: 5px">
+                                                            <a th:href="@{/home}" class="btn btn-primary w-25">Reinitialiser</a>
+                                                            <button type="button" class="btn btn-success w-75" data-toggle="modal"
+                                                                    data-target=".bd-example-modal-lg">Voir le details de la migration</button>
+                                                        </div>
                                                     </div>
                                                     <div id="loader_container" style="display: none;position: relative;justify-content: center;align-items: center;width: 100%">
                                                         <div class="loader_factory"></div>
                                                     </div>
                                                 </div>
-
-<!--                                                <div style="display: flex;justify-content: center;width: 100%;">-->
-<!--                                                    <a class="btn btn-success w-100" style="color: white" onclick="start(this)">Commencer</a>-->
-<!--                                                </div>-->
                                             </fieldset>
                                         </form>
                                     </div>
@@ -342,6 +366,23 @@
                         </div>
                     </div>
                 </section>
+                <div class="modal fade bd-example-modal-lg w-100" tabindex="-1" role="dialog" aria-labelledby="myLargeModalLabel"
+                     aria-hidden="true">
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="myLargeModalLabel">Details de la migration</h5>
+                                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                                    <span aria-hidden="true">&times;</span>
+                                </button>
+                            </div>
+                            <div class="modal-body">
+                                <div id="terminal" class="terminal"></div>
+                                <button id="downloadBtn" class="btn btn-icon icon-left btn-success w-100"><i class="fa fa-download"></i> T&eacute;l&eacute;charger</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <div th:replace="~{layout/front/setting :: sidebar}"></div>
 
             </div>
@@ -353,6 +394,7 @@
 <script th:src="@{/assets/bundles/jquery-validation/dist/jquery.validate.min.js}"></script>
 <script th:src="@{/assets/bundles/izitoast/js/iziToast.min.js}"></script>
 <script th:src="@{/assets/bundles/apexcharts/apexcharts.min.js}"></script>
+<script th:src="@{/assets/bundles/chartjs/chart.min.js}"></script>
 <!-- JS Libraies -->
 <script th:src="@{/assets/bundles/jquery-steps/jquery.steps.min.js}"></script>
 <!-- Page Specific JS File -->
@@ -411,10 +453,15 @@
                     document.getElementById("totalStat").textContent = data.total;
                     document.getElementById("succesStat").textContent = data.totalSucces;
                     document.getElementById("echecStat").textContent = data.totalEchec;
-                    document.getElementById("tauxStat").textContent = data.tauxReussite+"%";
+                    console.log(data.log);
+                    afficherTexte(data.log);
+                    let reussite = (data.totalSucces/data.total)*100;
+                    let echec = (data.totalEchec/data.total)*100;
+                    // document.getElementById("tauxStat").textContent = data.tauxReussite+"%";
 
                     /*Manova chart*/
                     chart2(data.statistiques);
+                    affChartPourcentage([reussite,echec])
                     let dashBoard = document.getElementById("dashboard");
                     dashBoard.setAttribute("isPrint","true");
                 }else {
@@ -522,79 +569,84 @@
         chart.render();
     }
 
-    // function chart2() {
-    //     var options = {
-    //         chart: {
-    //             height: 250,
-    //             type: 'bar',
-    //             stacked: true,
-    //             toolbar: {
-    //                 show: false
-    //             },
-    //             zoom: {
-    //                 enabled: true
-    //             }
-    //         },
-    //         responsive: [{
-    //             breakpoint: 480,
-    //             options: {
-    //                 legend: {
-    //                     position: 'bottom',
-    //                     offsetX: -10,
-    //                     offsetY: 0
-    //                 }
-    //             }
-    //         }],
-    //         plotOptions: {
-    //             bar: {
-    //                 horizontal: false,
-    //                 columnWidth: '200px',
-    //             },
-    //         },
-    //         series: [{
-    //             name: 'PRODUCT A',
-    //             data: [44, 55, 41, 67, 22, 43]
-    //         }, {
-    //             name: 'PRODUCT B',
-    //             data: [13, 23, 20, 8, 13, 27]
-    //         }, {
-    //             name: 'PRODUCT C',
-    //             data: [11, 17, 15, 15, 21, 14]
-    //         }],
-    //         xaxis: {
-    //             type: 'datetime',
-    //             categories: ['01/01/2019 GMT', '01/02/2019 GMT', '01/03/2019 GMT', '01/04/2019 GMT', '01/05/2019 GMT', '01/06/2019 GMT'],
-    //             labels: {
-    //                 style: {
-    //                     colors: "#9aa0ac"
-    //                 }
-    //             }
-    //         },
-    //         yaxis: {
-    //             labels: {
-    //                 style: {
-    //                     color: "#9aa0ac"
-    //                 }
-    //             }
-    //         },
-    //         legend: {
-    //             position: 'top',
-    //             offsetY: 40,
-    //             show: false,
-    //         },
-    //         fill: {
-    //             opacity: 1
-    //         },
-    //     }
-    //
-    //     var chart = new ApexCharts(
-    //         document.querySelector("#chart2"),
-    //         options
-    //     );
-    //
-    //     chart.render();
-    //
-    // }
+    function affChartPourcentage(data){
+        var ctx = document.getElementById("myChart3").getContext('2d');
+        var myChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                datasets: [{
+                    data: data,
+                    backgroundColor: [
+                        '#00e396',
+                        '#ff3025'
+                    ],
+                    label: 'Taux de reussite'
+                }],
+                labels: [
+                    'Succes',
+                    'Echec'
+                ],
+            },
+            options: {
+                responsive: true,
+                legend: {
+                    position: 'bottom',
+                },
+            }
+        });
+    }
+
+    const terminal = document.getElementById('terminal');
+    const downloadBtn = document.getElementById('downloadBtn');
+    let displayedText = ''; // contiendra tout le texte affiché
+
+    // 🔹 Fonction pour afficher un texte (avec effet de saisie)
+    function afficherTexte(text, vitesse = 5) {
+        let i = 0;
+        const cursor = document.createElement('span');
+        cursor.classList.add('cursor');
+        terminal.appendChild(cursor);
+
+        function step() {
+            if (i < text.length) {
+                const char = text[i++];
+                cursor.insertAdjacentText('beforebegin', char);
+                displayedText += char;
+                terminal.scrollTop = terminal.scrollHeight;
+                setTimeout(step, vitesse);
+            } else {
+                cursor.remove();
+            }
+        }
+        step();
+    }
+
+    function getDateTimeForFilename() {
+        const now = new Date();
+
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
+
+        // Aucun caractère interdit : on remplace ":" par "-"
+        return `${year}-${month}-${day}_${hours}-${minutes}-${seconds}`;
+    }
+
+    function telechargerContenu() {
+        const blob = new Blob([displayedText], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'details_migration_'+getDateTimeForFilename()+'.txt';
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    downloadBtn.addEventListener('click', telechargerContenu);
+
 </script>
 </body>
 </html>
