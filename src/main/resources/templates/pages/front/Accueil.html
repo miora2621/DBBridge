@@ -602,23 +602,18 @@
 
     // 🔹 Fonction pour afficher un texte (avec effet de saisie)
     function afficherTexte(text, vitesse = 5) {
-        let i = 0;
         const cursor = document.createElement('span');
         cursor.classList.add('cursor');
         terminal.appendChild(cursor);
 
-        function step() {
-            if (i < text.length) {
-                const char = text[i++];
-                cursor.insertAdjacentText('beforebegin', char);
-                displayedText += char;
-                terminal.scrollTop = terminal.scrollHeight;
-                setTimeout(step, vitesse);
-            } else {
-                cursor.remove();
-            }
-        }
-        step();
+        // Ajoute tout le texte directement
+        cursor.insertAdjacentText('beforebegin', text);
+
+        displayedText += text;
+        terminal.scrollTop = terminal.scrollHeight;
+
+        // Retire le curseur après affichage
+        cursor.remove();
     }
 
     function getDateTimeForFilename() {
