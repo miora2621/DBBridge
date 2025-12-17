@@ -50,7 +50,7 @@ public class SqlViewTranslator {
         messages.add(message);
 
         JsonObject body = new JsonObject();
-        body.addProperty("model", "gpt-4o"); // Modèle plus puissant et précis
+        body.addProperty("model", "gpt-4o-mini"); // Modèle plus puissant et précis
         body.add("messages", messages);
         body.addProperty("temperature", 0.1);
 
@@ -97,25 +97,14 @@ public class SqlViewTranslator {
 
         String prompt = """
         Tu es un traducteur SQL expert.
-        Convertis **une vue PostgreSQL** en **vue Oracle fonctionnelle**, sans changer la logique.
+        Convertis **une vue PostgreSQL** en **vue Oracle 11g fonctionnelle**, sans changer la logique.
 
         RÈGLES :
         - Garde même structure : SELECT, FROM, WHERE, GROUP BY, ORDER BY (pas de réorganisation).
         - Les noms Oracle sont limités à 30 caractères maximum (tronque si nécessaire).
-        - COALESCE reste COALESCE (compatible) ou convertis en NVL si 2 arguments.
-        - CURRENT_DATE → SYSDATE, NOW() → SYSDATE, CURRENT_TIMESTAMP → SYSTIMESTAMP.
-        - LEFT JOIN reste LEFT JOIN (pas de (+) Oracle legacy).
-        - TOUTE sous-requête dans un FROM doit avoir un alias : (SELECT ...) sub.
-        - Remplace les cast PostgreSQL (::type) par CAST(x AS type) Oracle.
-        - Types PostgreSQL → Oracle : TEXT→VARCHAR2, SERIAL→NUMBER, BOOLEAN→NUMBER(1).
-        - STRING_AGG → LISTAGG, EXTRACT(EPOCH FROM x)→(x - DATE'1970-01-01')*86400.
-        - LIMIT x → FETCH FIRST x ROWS ONLY (Oracle 12c+) ou ROWNUM <= x (legacy).
-        - OFFSET → ROW_NUMBER() OVER() avec filtrage dans sous-requête.
-        - ILIKE → UPPER(col) LIKE UPPER(val).
-        - Regex PostgreSQL (~) → REGEXP_LIKE Oracle.
-        - Alias uniques : pas deux identiques (renomme si besoin).
-        - Ajoute NVL(x,0) pour les opérations arithmétiques si besoin.
-        - Ne renvoie **que le SQL Oracle**, sans explication ni texte.
+        - garde tout le view mais juste adapte la syntaxe pour avoir une version oracle qui va faire exactement pareil.
+        -c'est très important de garder la même logique.
+        -ne repond que par le code sql oracle sans explication ni texte.
 
         Format final :
         CREATE OR REPLACE VIEW nom_vue AS
@@ -132,7 +121,7 @@ public class SqlViewTranslator {
         messages.add(message);
 
         JsonObject body = new JsonObject();
-        body.addProperty("model", "gpt-4o"); // Modèle plus puissant et précis
+        body.addProperty("model", "gpt-4o-mini"); // Modèle plus puissant et précis
         body.add("messages", messages);
         body.addProperty("temperature", 0.1);
 

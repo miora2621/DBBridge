@@ -86,49 +86,76 @@ public class MigrationStats {
         }
     }
 
-    public void printDetailed() {
+    public String printDetailed() {
+        String reponse = "";
+        reponse += "\n" + "=".repeat(80) + "\n";
+        reponse += "=== RÉSUMÉ DÉTAILLÉ DE LA MIGRATION ORACLE → POSTGRESQL ===\n";
+        reponse += "=".repeat(80) + "\n";
+        
         System.out.println("\n" + "=".repeat(80));
         System.out.println("=== RÉSUMÉ DÉTAILLÉ DE LA MIGRATION ORACLE → POSTGRESQL ===");
         System.out.println("=".repeat(80));
         
-        printCategory("TABLES", tablesSuccess, tablesTotal, tablesFailed, failedTables);
-        printCategory("DONNÉES", dataSuccess, dataTotal, dataFailed, failedData);
+        reponse += printCategory("TABLES", tablesSuccess, tablesTotal, tablesFailed, failedTables);
+        reponse += printCategory("DONNÉES", dataSuccess, dataTotal, dataFailed, failedData);
+        
         if (dataRowsFailed > 0) {
+            reponse += "   ⚠️  Lignes individuelles échouées: " + dataRowsFailed + "\n";
             System.out.println("   ⚠️  Lignes individuelles échouées: " + dataRowsFailed);
         }
         if (nullBytesRemoved > 0) {
+            reponse += "   🔧 NULL bytes nettoyés: " + nullBytesRemoved + "\n";
             System.out.println("   🔧 NULL bytes nettoyés: " + nullBytesRemoved);
         }
-        printCategoryWithErrors("SÉQUENCES", sequencesSuccess, sequencesTotal, sequencesFailed, failedSequences);
-        printCategoryWithErrors("INDEX", indexSuccess, indexTotal, indexFailed, failedIndexes);
-        printCategory("CONTRAINTES PK", pkSuccess, pkTotal, pkFailed, Collections.emptyList());
-        printCategoryWithErrors("CONTRAINTES FK", fkSuccess, fkTotal, fkFailed, failedFKs);
-        printCategoryWithErrors("CONTRAINTES UNIQUE", uniqueSuccess, uniqueTotal, uniqueFailed, failedUniques);
-        printCategoryWithErrors("CONTRAINTES CHECK", checkSuccess, checkTotal, checkFailed, failedChecks);
-        printCategoryWithErrors("VUES", viewsSuccess, viewsTotal, viewsFailed, failedViews);
-        printCategoryWithErrors("FONCTIONS", functionsSuccess, functionsTotal, functionsFailed, failedFunctions);
-        printCategoryWithErrors("TRIGGERS", triggersSuccess, triggersTotal, triggersFailed, failedTriggers);
+        
+        reponse += printCategoryWithErrors("SÉQUENCES", sequencesSuccess, sequencesTotal, sequencesFailed, failedSequences);
+        reponse += printCategoryWithErrors("INDEX", indexSuccess, indexTotal, indexFailed, failedIndexes);
+        reponse += printCategory("CONTRAINTES PK", pkSuccess, pkTotal, pkFailed, Collections.emptyList());
+        reponse += printCategoryWithErrors("CONTRAINTES FK", fkSuccess, fkTotal, fkFailed, failedFKs);
+        reponse += printCategoryWithErrors("CONTRAINTES UNIQUE", uniqueSuccess, uniqueTotal, uniqueFailed, failedUniques);
+        reponse += printCategoryWithErrors("CONTRAINTES CHECK", checkSuccess, checkTotal, checkFailed, failedChecks);
+        reponse += printCategoryWithErrors("VUES", viewsSuccess, viewsTotal, viewsFailed, failedViews);
+        reponse += printCategoryWithErrors("FONCTIONS", functionsSuccess, functionsTotal, functionsFailed, failedFunctions);
+        reponse += printCategoryWithErrors("TRIGGERS", triggersSuccess, triggersTotal, triggersFailed, failedTriggers);
         
         if (!warnings.isEmpty()) {
+            reponse += "\n⚠️  AVERTISSEMENTS:\n";
             System.out.println("\n⚠️  AVERTISSEMENTS:");
-            warnings.forEach(w -> System.out.println("   " + w));
+            for (String w : warnings) {
+                reponse += "   " + w + "\n";
+                System.out.println("   " + w);
+            }
         }
         
         // RÉSUMÉ DES LOGS GROUPÉ PAR TYPE D'ERREUR
         if (!errorsSummary.isEmpty()) {
+            reponse += "\n" + "=".repeat(80) + "\n";
+            reponse += "=== RÉSUMÉ DES ERREURS PAR TYPE ===\n";
+            reponse += "=".repeat(80) + "\n";
+            
             System.out.println("\n" + "=".repeat(80));
             System.out.println("=== RÉSUMÉ DES ERREURS PAR TYPE ===");
             System.out.println("=".repeat(80));
-            errorsSummary.forEach((errorType, count) -> {
-                System.out.println(String.format("🔴 %-40s : %d occurrence(s)", errorType, count));
+            
+            for (Map.Entry<String, Integer> entry : errorsSummary.entrySet()) {
+                String errorType = entry.getKey();
+                int count = entry.getValue();
+                String line = String.format("🔴 %-40s : %d occurrence(s)", errorType, count);
+                reponse += line + "\n";
+                System.out.println(line);
+                
                 List<String> examples = errorsExamples.get(errorType);
                 if (examples != null && !examples.isEmpty()) {
-                    System.out.println("   Exemples: " + String.join(", ", examples.subList(0, Math.min(3, examples.size()))));
+                    String examplesLine = "   Exemples: " + String.join(", ", examples.subList(0, Math.min(3, examples.size())));
+                    reponse += examplesLine + "\n";
+                    System.out.println(examplesLine);
                 }
-            });
+            }
+            reponse += "=".repeat(80) + "\n";
             System.out.println("=".repeat(80));
         }
         
+        reponse += "\n" + "=".repeat(80) + "\n";
         System.out.println("\n" + "=".repeat(80));
         
         int totalObjets = tablesTotal + dataTotal + sequencesTotal + pkTotal + 
@@ -143,83 +170,130 @@ public class MigrationStats {
         
         double globalScore = totalObjets > 0 ? (totalSuccess * 100.0 / totalObjets) : 0;
         
-        System.out.println(String.format("🎯 SCORE GLOBAL : %.1f%% (%d/%d objets migrés avec succès, %d échecs)", 
-            globalScore, totalSuccess, totalObjets, totalFailed));
+        String finalLine = String.format("🎯 SCORE GLOBAL : %.1f%% (%d/%d objets migrés avec succès, %d échecs)", 
+            globalScore, totalSuccess, totalObjets, totalFailed);
+        reponse += finalLine + "\n";
+        reponse += "=".repeat(80) + "\n\n";
+        
+        System.out.println(finalLine);
         System.out.println("=".repeat(80) + "\n");
+        
+        return reponse;
     }
     
-    private void printCategory(String name, int success, int total, int failed, List<String> failedList) {
+    private String printCategory(String name, int success, int total, int failed, List<String> failedList) {
+        String result = "";
         double pct = total > 0 ? (success * 100.0 / total) : 0;
-        System.out.println(String.format("📊 %-20s : %d/%d migrés (%.1f%%) - %d échecs", 
-            name, success, total, pct, failed));
+        String line = String.format("📊 %-20s : %d/%d migrés (%.1f%%) - %d échecs", 
+            name, success, total, pct, failed);
+        result += line + "\n";
+        System.out.println(line);
+        
         if (!failedList.isEmpty() && failedList.size() <= 5) {
-            System.out.println("   ❌ Échecs: " + String.join(", ", failedList));
+            String failedLine = "   ❌ Échecs: " + String.join(", ", failedList);
+            result += failedLine + "\n";
+            System.out.println(failedLine);
         } else if (failedList.size() > 5) {
-            System.out.println("   ❌ " + failed + " échecs (voir résumé ci-dessus)");
+            String failedLine = "   ❌ " + failed + " échecs (voir résumé ci-dessus)";
+            result += failedLine + "\n";
+            System.out.println(failedLine);
         }
+        
+        return result;
     }
     
-    private void printCategoryWithErrors(String name, int success, int total, int failed, Map<String, String> errors) {
+    private String printCategoryWithErrors(String name, int success, int total, int failed, Map<String, String> errors) {
+        String result = "";
         double pct = total > 0 ? (success * 100.0 / total) : 0;
-        System.out.println(String.format("📊 %-20s : %d/%d migrés (%.1f%%) - %d échecs", 
-            name, success, total, pct, failed));
+        String line = String.format("📊 %-20s : %d/%d migrés (%.1f%%) - %d échecs", 
+            name, success, total, pct, failed);
+        result += line + "\n";
+        System.out.println(line);
+        
         if (!errors.isEmpty() && errors.size() <= 3) {
-            errors.forEach((k, v) -> {
-                String msg = v.length() > 80 ? v.substring(0, 80) + "..." : v;
-                System.out.println("   ❌ " + k + ": " + msg);
-            });
+            for (Map.Entry<String, String> entry : errors.entrySet()) {
+                String msg = entry.getValue().length() > 80 ? entry.getValue().substring(0, 80) + "..." : entry.getValue();
+                String errorLine = "   ❌ " + entry.getKey() + ": " + msg;
+                result += errorLine + "\n";
+                System.out.println(errorLine);
+            }
         } else if (errors.size() > 3) {
-            System.out.println("   ❌ " + failed + " échecs (voir résumé ci-dessus)");
+            String errorLine = "   ❌ " + failed + " échecs (voir résumé ci-dessus)";
+            result += errorLine + "\n";
+            System.out.println(errorLine);
         }
+        
+        return result;
     }
 
-    public void printAllErrorsDetailed() {
+    public String printAllErrorsDetailed() {
+        String reponse = "";
+        
         if (!allErrors.isEmpty()) {
+            reponse += "\n" + "=".repeat(100) + "\n";
+            reponse += "=== TOUTES LES ERREURS DÉTAILLÉES ===\n";
+            reponse += "=".repeat(100) + "\n";
+            
             System.out.println("\n" + "=".repeat(100));
             System.out.println("=== TOUTES LES ERREURS DÉTAILLÉES ===");
             System.out.println("=".repeat(100));
             
             for (String error : allErrors) {
+                reponse += error + "\n";
+                reponse += "-".repeat(100) + "\n";
                 System.out.println(error);
                 System.out.println("-".repeat(100));
             }
         }
         
         // Afficher aussi les erreurs par catégorie
-        printAllErrorsForCategory("FONCTIONS", failedFunctions);
-        printAllErrorsForCategory("VUES", failedViews);
-        printAllErrorsForCategoryList("TABLES", failedTables);
-        printAllErrorsForCategory("SÉQUENCES", failedSequences);
-        printAllErrorsForCategory("INDEX", failedIndexes);
-        printAllErrorsForCategory("CONTRAINTES FK", failedFKs);
-        printAllErrorsForCategory("CONTRAINTES UNIQUE", failedUniques);
-        printAllErrorsForCategory("TRIGGERS", failedTriggers);
-        printAllErrorsForCategoryList("DONNÉES (Tables)", failedData);
+        reponse += printAllErrorsForCategory("FONCTIONS", failedFunctions);
+        reponse += printAllErrorsForCategory("VUES", failedViews);
+        reponse += printAllErrorsForCategoryList("TABLES", failedTables);
+        reponse += printAllErrorsForCategory("SÉQUENCES", failedSequences);
+        reponse += printAllErrorsForCategory("INDEX", failedIndexes);
+        reponse += printAllErrorsForCategory("CONTRAINTES FK", failedFKs);
+        reponse += printAllErrorsForCategory("CONTRAINTES UNIQUE", failedUniques);
+        reponse += printAllErrorsForCategory("TRIGGERS", failedTriggers);
+        reponse += printAllErrorsForCategoryList("DONNÉES (Tables)", failedData);
                 
-        // Afficher aussi les listes d'erreurs
-        printAllErrorsForCategoryList("DONNÉES (Tables)", failedData);
+        return reponse;
     }
 
-    private void printAllErrorsForCategory(String category, Map<String, String> errors) {
+    private String printAllErrorsForCategory(String category, Map<String, String> errors) {
+        String result = "";
         if (!errors.isEmpty()) {
+            result += "\n--- " + category + " (" + errors.size() + " erreurs) ---\n";
             System.out.println("\n--- " + category + " (" + errors.size() + " erreurs) ---");
-            errors.forEach((name, error) -> {
-                System.out.println("🔴 " + name + ":");
-                System.out.println("   Message: " + (error.length() > 200 ? error.substring(0, 200) + "..." : error));
-                System.out.println("   Type: " + classifyError(error));
+            
+            for (Map.Entry<String, String> entry : errors.entrySet()) {
+                result += "🔴 " + entry.getKey() + ":\n";
+                result += "   Message: " + (entry.getValue().length() > 200 ? entry.getValue().substring(0, 200) + "..." : entry.getValue()) + "\n";
+                result += "   Type: " + classifyError(entry.getValue()) + "\n\n";
+                
+                System.out.println("🔴 " + entry.getKey() + ":");
+                System.out.println("   Message: " + (entry.getValue().length() > 200 ? entry.getValue().substring(0, 200) + "..." : entry.getValue()));
+                System.out.println("   Type: " + classifyError(entry.getValue()));
                 System.out.println();
-            });
+            }
         }
+        return result;
     }
     
-    private void printAllErrorsForCategoryList(String category, List<String> errors) {
+    private String printAllErrorsForCategoryList(String category, List<String> errors) {
+        String result = "";
         if (!errors.isEmpty()) {
+            result += "\n--- " + category + " (" + errors.size() + " erreurs) ---\n";
             System.out.println("\n--- " + category + " (" + errors.size() + " erreurs) ---");
+            
             for (String error : errors) {
+                result += "🔴 " + error + "\n";
                 System.out.println("🔴 " + error);
             }
+            result += "\n";
             System.out.println();
         }
+        return result;
     }
     
     static String classifyError(String errorMessage) {

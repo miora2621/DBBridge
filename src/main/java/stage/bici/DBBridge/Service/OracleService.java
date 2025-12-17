@@ -437,7 +437,7 @@ public class OracleService {
     }
 
     // ============================================================
-    // TRI TOPOLOGIQUE DES VUES
+    // TRI  GIQUE DES VUES
     // ============================================================
 
     private List<String> sortViewsByDependencies(DatabaseObjects db) {
@@ -1133,61 +1133,61 @@ public class OracleService {
             if (migrated.size() >= db.validViews.size() || (successThisPass == 0 && pass > 2)) break;
         }
 
-        // // ===== FALLBACK : Tentative avec la définition complète Oracle =====
-        // List<String> stillFailed = new ArrayList<>();
-        // for (String viewName : sortedViews) {
-        //     if (stats.failedViews.containsKey(viewName)) {
-        //         stillFailed.add(viewName);
-        //     }
-        // }
+        // ===== FALLBACK : Tentative avec la définition complète Oracle =====
+        List<String> stillFailed = new ArrayList<>();
+        for (String viewName : sortedViews) {
+            if (stats.failedViews.containsKey(viewName)) {
+                stillFailed.add(viewName);
+            }
+        }
 
-        // if (!stillFailed.isEmpty()) {
-        //     System.out.println("\n🔄 FALLBACK: Tentative avec définitions originales...");
-        //     log += "\n🔄 FALLBACK: Tentative avec définitions originales...\n";
-        //     int fallbackSuccess = 0;
+        if (!stillFailed.isEmpty()) {
+            System.out.println("\n🔄 FALLBACK: Tentative avec définitions originales...");
+            log += "\n🔄 FALLBACK: Tentative avec définitions originales...\n";
+            int fallbackSuccess = 0;
 
-        //     for (String viewName : stillFailed) {
-        //         try {
-        //             String fullViewDef = getFullViewDefinition(ora, db.owner, viewName);
+            for (String viewName : stillFailed) {
+                try {
+                    String fullViewDef = getFullViewDefinition(ora, db.owner, viewName);
 
                     
-        //             if (fullViewDef == null || fullViewDef.trim().isEmpty()) {
-        //                 System.out.println("⚠️  Définition vide pour: " + viewName);
-        //                 log += "⚠️  Définition vide pour: " + viewName + "\n";
-        //                 continue;
-        //             }
+                    if (fullViewDef == null || fullViewDef.trim().isEmpty()) {
+                        System.out.println("⚠️  Définition vide pour: " + viewName);
+                        log += "⚠️  Définition vide pour: " + viewName + "\n";
+                        continue;
+                    }
 
-        //             // Traduire la vue Oracle vers PostgreSQL avec l'IA
-        //             String viewIA = SqlViewTranslator.translateOracleToPostgres(fullViewDef);
+                    // Traduire la vue Oracle vers PostgreSQL avec l'IA
+                    String viewIA = SqlViewTranslator.translateOracleToPostgres(fullViewDef);
 
-        //             System.out.println("View normal: \n" + fullViewDef);
-        //             System.out.println("View IA: \n" + viewIA);
-        //             log += "View normal: \n" + fullViewDef + "\n";
-        //             log += "View IA: \n" + viewIA + "\n";
+                    System.out.println("View normal: \n" + fullViewDef);
+                    System.out.println("View IA: \n" + viewIA);
+                    log += "View normal: \n" + fullViewDef + "\n";
+                    log += "View IA: \n" + viewIA + "\n";
                     
-        //             try (Statement st = pg.createStatement()) {
-        //                 st.executeUpdate(viewIA);
+                    try (Statement st = pg.createStatement()) {
+                        st.executeUpdate(viewIA);
                         
-        //                 // Mise à jour des stats
-        //                 stats.viewsFailed--;
-        //                 stats.viewsSuccess++;
-        //                 stats.failedViews.remove(viewName);
-        //                 fallbackSuccess++;
+                        // Mise à jour des stats
+                        stats.viewsFailed--;
+                        stats.viewsSuccess++;
+                        stats.failedViews.remove(viewName);
+                        fallbackSuccess++;
                         
-        //                 System.out.println("🔄 Vue fallback créée: " + viewName);
-        //                 log += "🔄 Vue fallback créée: " + viewName + "\n";
-        //                 stats.addError("🔄 VUE FALLBACK " + viewName + ": Créée avec traduction IA");
-        //             }
+                        System.out.println("🔄 Vue fallback créée: " + viewName);
+                        log += "🔄 Vue fallback créée: " + viewName + "\n";
+                        stats.addError("🔄 VUE FALLBACK " + viewName + ": Créée avec traduction IA");
+                    }
                     
-        //         } catch (Exception e) {
-        //             System.out.println("❌ Échec fallback pour: " + viewName + " - " + e.getMessage());
-        //             log += "❌ Échec fallback pour: " + viewName + " - " + e.getMessage() + "\n";
-        //         }
-        //     }
+                } catch (Exception e) {
+                    System.out.println("❌ Échec fallback pour: " + viewName + " - " + e.getMessage());
+                    log += "❌ Échec fallback pour: " + viewName + " - " + e.getMessage() + "\n";
+                }
+            }
 
-        //     System.out.println("Fallback: " + fallbackSuccess + "/" + stillFailed.size() + " vues créées");
-        //     log += "Fallback: " + fallbackSuccess + "/" + stillFailed.size() + " vues créées\n";
-        // }
+            System.out.println("Fallback: " + fallbackSuccess + "/" + stillFailed.size() + " vues créées");
+            log += "Fallback: " + fallbackSuccess + "/" + stillFailed.size() + " vues créées\n";
+        }
 
         System.out.println("Vues migrées: " + stats.viewsSuccess + "/" + stats.viewsTotal);
         log += "Vues migrées: " + stats.viewsSuccess + "/" + stats.viewsTotal + "\n";
@@ -2073,8 +2073,10 @@ public class OracleService {
             stats.triggersFailed = stats.triggersTotal - stats.triggersSuccess;
             stats.pkFailed = stats.pkTotal - stats.pkSuccess;
 
-            stats.printDetailed();
-            stats.printAllErrorsDetailed();
+            String logy = stats.printDetailed();
+            log += logy;
+            String errera = stats.printAllErrorsDetailed();
+            log += errera;
             
         } catch (Exception e) {
             System.err.println("\n❌ ERREUR CRITIQUE: " + e.getMessage());
@@ -2083,8 +2085,11 @@ public class OracleService {
             stats.addError("❌ ERREUR CRITIQUE: " + e.getMessage());
             
             // Afficher ce qui a été collecté malgré l'erreur
-            stats.printDetailed();
+            String details = stats.printDetailed();
+            log += details;
             stats.printAllErrorsDetailed();
+            String errera = stats.printAllErrorsDetailed();
+            log += errera;
         }
         stats.logs = log;
         return stats;

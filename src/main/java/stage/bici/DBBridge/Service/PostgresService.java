@@ -1212,60 +1212,60 @@ private void migrateViews(Connection pg, Connection ora, PostgresDatabaseObjects
         if (successThisPass == 0 && pass > 2) break;
     }
     
-    // ===== FALLBACK : Tentative avec la définition complète PostgreSQL et traduction IA =====
-    // List<String> stillFailed = new ArrayList<>();
-    // for (String viewName : sortedViews) {
-    //     if (stats.failedViews.containsKey(viewName)) {
-    //         stillFailed.add(viewName);
-    //     }
-    // }
+    //===== FALLBACK : Tentative avec la définition complète PostgreSQL et traduction IA =====
+    List<String> stillFailed = new ArrayList<>();
+    for (String viewName : sortedViews) {
+        if (stats.failedViews.containsKey(viewName)) {
+            stillFailed.add(viewName);
+        }
+    }
 
-    // if (!stillFailed.isEmpty()) {
-    //     System.out.println("\n🔄 FALLBACK: Tentative avec définitions originales et traduction IA...");
-    //     log += "\n🔄 FALLBACK: Tentative avec définitions originales et traduction IA...\n";
-    //     int fallbackSuccess = 0;
+    if (!stillFailed.isEmpty()) {
+        System.out.println("\n🔄 FALLBACK: Tentative avec définitions originales et traduction IA...");
+        log += "\n🔄 FALLBACK: Tentative avec définitions originales et traduction IA...\n";
+        int fallbackSuccess = 0;
 
-    //     for (String viewName : stillFailed) {
-    //         try {
-    //             String fullViewDef = getFullViewDefinitionFromPostgres(pg, "schema", viewName);
+        for (String viewName : stillFailed) {
+            try {
+                String fullViewDef = getFullViewDefinitionFromPostgres(pg, "schema", viewName);
                 
-    //             if (fullViewDef == null || fullViewDef.trim().isEmpty()) {
-    //                 System.out.println("⚠️  Définition vide pour: " + viewName);
-    //                 log += "⚠️  Définition vide pour: " + viewName + "\n";
-    //                 continue;
-    //             }
+                if (fullViewDef == null || fullViewDef.trim().isEmpty()) {
+                    System.out.println("⚠️  Définition vide pour: " + viewName);
+                    log += "⚠️  Définition vide pour: " + viewName + "\n";
+                    continue;
+                }
 
-    //             // Traduire la vue PostgreSQL vers Oracle avec l'IA
-    //             String viewIA = SqlViewTranslator.translatePostgresToOracle(fullViewDef);
+                // Traduire la vue PostgreSQL vers Oracle avec l'IA
+                String viewIA = SqlViewTranslator.translatePostgresToOracle(fullViewDef);
 
-    //             System.out.println("View PostgreSQL originale: \n" + fullViewDef);
-    //             System.out.println("View Oracle traduite (IA): \n" + viewIA);
-    //             log += "View PostgreSQL originale: \n" + fullViewDef + "\n";
-    //             log += "View Oracle traduite (IA): \n" + viewIA + "\n";
+                System.out.println("View PostgreSQL originale: \n" + fullViewDef);
+                System.out.println("View Oracle traduite (IA): \n" + viewIA);
+                log += "View PostgreSQL originale: \n" + fullViewDef + "\n";
+                log += "View Oracle traduite (IA): \n" + viewIA + "\n";
                 
-    //             try (Statement st = ora.createStatement()) {
-    //                 st.executeUpdate(viewIA);
+                try (Statement st = ora.createStatement()) {
+                    st.executeUpdate(viewIA);
                     
-    //                 // Mise à jour des stats
-    //                 stats.viewsFailed--;
-    //                 stats.viewsSuccess++;
-    //                 stats.failedViews.remove(viewName);
-    //                 fallbackSuccess++;
-                    
-    //                 System.out.println("🔄 Vue fallback créée: " + viewName);
-    //                 log += "🔄 Vue fallback créée: " + viewName + "\n";
-    //                 stats.addError("🔄 VUE FALLBACK " + viewName + ": Créée avec traduction IA");
-    //             }
+                    // Mise à jour des stats
+                    stats.viewsFailed--; 
+                    stats.viewsSuccess++;
+                    stats.failedViews.remove(viewName);
+                    fallbackSuccess++;
+                     
+                    System.out.println("🔄 Vue fallback créée: " + viewName);
+                    log += "🔄 Vue fallback créée: " + viewName + "\n";
+                    stats.addError("🔄 VUE FALLBACK " + viewName + ": Créée avec traduction IA");
+                }
                 
-    //         } catch (Exception e) {
-    //             System.out.println("❌ Échec fallback pour: " + viewName + " - " + e.getMessage());
-    //             log += "❌ Échec fallback pour: " + viewName + " - " + e.getMessage() + "\n";
-    //         }
-    //     }
+            } catch (Exception e) {
+                System.out.println("❌ Échec fallback pour: " + viewName + " - " + e.getMessage());
+                log += "❌ Échec fallback pour: " + viewName + " - " + e.getMessage() + "\n";
+            }
+        }
 
-    //     System.out.println("Fallback: " + fallbackSuccess + "/" + stillFailed.size() + " vues créées");
-    //     log += "Fallback: " + fallbackSuccess + "/" + stillFailed.size() + " vues créées\n";
-    // }
+        System.out.println("Fallback: " + fallbackSuccess + "/" + stillFailed.size() + " vues créées");
+        log += "Fallback: " + fallbackSuccess + "/" + stillFailed.size() + " vues créées\n";
+    }
     
     double viewMigrationRate = (double) stats.viewsSuccess / stats.viewsTotal * 100;
     System.out.println(String.format("\n🎯 Taux de migration des vues: %.1f%% (%d/%d)", 
